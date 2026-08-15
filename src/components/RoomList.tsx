@@ -94,22 +94,6 @@ export const RoomList: React.FC<RoomListProps> = ({
   }, [collegeRooms, selectedFilter, searchQuery, unlockedPrivateRoomIds, currentUserUsername, isAdmin]);
 
   const handleRoomCardClick = (room: TrendingRoom) => {
-    if (room.isPrivate) {
-      const isCreator = currentUserUsername && room.creatorUsername === currentUserUsername;
-      const isJoined =
-        isCreator ||
-        (Array.isArray(room.activeMembers) && room.activeMembers.includes(currentUserUsername || ''));
-      const isUnlocked = unlockedPrivateRoomIds.includes(room.id);
-      const hasAccess = isAdmin || isCreator || isUnlocked || isJoined;
-
-      if (!hasAccess) {
-        setPrivateInput('');
-        setPrivateError('');
-        setPrivateSuccess('');
-        setShowJoinPrivateModal(true);
-        return;
-      }
-    }
     onEnterRoom(room);
   };
 

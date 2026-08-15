@@ -280,7 +280,7 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
             return (
               <div
                 key={post.id}
-                className="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md transition overflow-hidden"
+                className="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md transition relative"
               >
                 <div className="p-5 sm:p-6 space-y-3.5">
                   {/* Top Bar: Author, Verification Badge, Time, and 3-Dot Action Menu */}
@@ -347,62 +347,79 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
                           <MoreVertical className="w-4 h-4" />
                         </button>
 
-                        {/* 3-Dot Dropdown Menu */}
+                        {/* 3-Dot Dropdown Menu with Click-Outside Backdrop */}
                         {openPostMenuId === post.id && (
-                          <div
-                            className="absolute right-0 top-full mt-1 w-48 bg-white border border-slate-200 rounded-2xl shadow-xl z-20 py-1.5 animate-in fade-in zoom-in-95 duration-100 text-xs"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {/* Author Profile */}
-                            <button
-                              onClick={() => {
-                                setOpenPostMenuId(null);
-                                onSelectUser?.(post.authorUsername);
-                              }}
-                              className="w-full px-3.5 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2 font-medium transition"
+                          <>
+                            <div
+                              className="fixed inset-0 z-40"
+                              onClick={() => setOpenPostMenuId(null)}
+                            />
+                            <div
+                              className="absolute right-0 top-full mt-1.5 w-52 bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 py-1.5 animate-in fade-in zoom-in-95 duration-100 text-xs"
+                              onClick={(e) => e.stopPropagation()}
                             >
-                              <User className="w-3.5 h-3.5 text-slate-500" />
-                              <span>View @{post.authorUsername}</span>
-                            </button>
-
-                            {/* Liked by Users */}
-                            <button
-                              onClick={() => {
-                                setOpenPostMenuId(null);
-                                setViewingUpvotersPost(post);
-                              }}
-                              className="w-full px-3.5 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2 font-medium transition"
-                            >
-                              <Heart className="w-3.5 h-3.5 text-red-500" />
-                              <span>Liked by ({post.upvoters?.length || 0})</span>
-                            </button>
-
-                            {/* Report Post */}
-                            <button
-                              onClick={() => {
-                                setOpenPostMenuId(null);
-                                onReportPost(post);
-                              }}
-                              className="w-full px-3.5 py-2 text-left text-amber-700 hover:bg-amber-50 flex items-center gap-2 font-medium transition"
-                            >
-                              <Flag className="w-3.5 h-3.5 text-amber-600" />
-                              <span>Report Post</span>
-                            </button>
-
-                            {/* Delete Post (if author or admin) */}
-                            {isAuthorOrAdmin && onDeletePost && (
+                              {/* Author Profile */}
                               <button
                                 onClick={() => {
                                   setOpenPostMenuId(null);
-                                  onDeletePost(post.id);
+                                  onSelectUser?.(post.authorUsername);
                                 }}
-                                className="w-full px-3.5 py-2 text-left text-red-600 hover:bg-red-50 flex items-center gap-2 font-bold transition border-t border-slate-100"
+                                className="w-full px-3.5 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2 font-medium transition cursor-pointer"
                               >
-                                <Trash2 className="w-3.5 h-3.5 text-red-500" />
-                                <span>Delete Post</span>
+                                <User className="w-3.5 h-3.5 text-slate-500" />
+                                <span>View @{post.authorUsername}</span>
                               </button>
-                            )}
-                          </div>
+
+                              {/* Liked by Users */}
+                              <button
+                                onClick={() => {
+                                  setOpenPostMenuId(null);
+                                  setViewingUpvotersPost(post);
+                                }}
+                                className="w-full px-3.5 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2 font-medium transition cursor-pointer"
+                              >
+                                <Heart className="w-3.5 h-3.5 text-red-500" />
+                                <span>Liked by ({post.upvoters?.length || 0})</span>
+                              </button>
+
+                              {/* Report Post */}
+                              <button
+                                onClick={() => {
+                                  setOpenPostMenuId(null);
+                                  onReportPost(post);
+                                }}
+                                className="w-full px-3.5 py-2 text-left text-amber-700 hover:bg-amber-50 flex items-center gap-2 font-medium transition cursor-pointer"
+                              >
+                                <Flag className="w-3.5 h-3.5 text-amber-600" />
+                                <span>Report Post</span>
+                              </button>
+
+                              {/* Delete Post (if author or admin) */}
+                              {isAuthorOrAdmin && onDeletePost && (
+                                <button
+                                  onClick={() => {
+                                    setOpenPostMenuId(null);
+                                    onDeletePost(post.id);
+                                  }}
+                                  className="w-full px-3.5 py-2 text-left text-red-600 hover:bg-red-50 flex items-center gap-2 font-bold transition border-t border-slate-100 cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                                  <span>Delete Post</span>
+                                </button>
+                              )}
+
+                              {/* Explicit Close Option */}
+                              <button
+                                onClick={() => setOpenPostMenuId(null)}
+                                className="w-full px-3.5 py-2 text-left text-slate-400 hover:text-slate-600 hover:bg-slate-50 flex items-center justify-between font-semibold transition border-t border-slate-100 cursor-pointer"
+                              >
+                                <span className="flex items-center gap-1.5">
+                                  <X className="w-3.5 h-3.5" />
+                                  <span>Close</span>
+                                </span>
+                              </button>
+                            </div>
+                          </>
                         )}
                       </div>
                     </div>

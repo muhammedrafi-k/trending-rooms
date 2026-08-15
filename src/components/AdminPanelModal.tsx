@@ -96,7 +96,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-black tracking-tight text-white">Developer Dashboard</h2>
                 <span className="px-2 py-0.5 bg-purple-500/20 border border-purple-500/40 text-purple-300 rounded-md text-[10px] font-bold uppercase">
-                  Lead Dev: Muhammed Rafi
+                  Lead Dev: Developer
                 </span>
               </div>
               <p className="text-xs text-slate-400">System Analytics, Content Moderation, Deletion Approvals & Global Operations</p>

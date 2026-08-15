@@ -1437,7 +1437,7 @@ export default function App() {
     const map = new Map<string, { username: string; displayName?: string; badge?: string }>();
 
     // Add Lead Dev
-    map.set('muhammedrafii2002', { username: 'muhammedrafii2002', displayName: 'Muhammed Rafi', badge: 'Lead Dev' });
+    map.set('muhammedrafii2002', { username: 'muhammedrafii2002', displayName: 'Developer', badge: 'Lead Dev' });
 
     // Add registered users from database
     dbUsers.forEach((u) => {
@@ -1536,6 +1536,7 @@ export default function App() {
             onUpdateRoom={handleUpdateRoom}
             onJoinRoom={handleJoinRoom}
             onLeaveRoom={handleLeaveRoom}
+            onDeleteRoom={handleDeleteRoom}
           />
         ) : activeTab === 'feed' ? (
           <LiveFeed

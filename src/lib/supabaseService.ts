@@ -547,7 +547,7 @@ export const supabaseService = {
           id: 'dev-lead-2026',
           profileId: 'PID-DEV202601',
           username: 'muhammedrafii2002',
-          displayName: 'Muhammed Rafi (Lead Dev)',
+          displayName: 'Developer',
           email: 'muhammedrafii2002@gmail.com',
           password: '!29042002@ifaR',
           collegeId: 'sn_cherthala',

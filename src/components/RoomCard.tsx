@@ -117,11 +117,11 @@ export const RoomCard: React.FC<RoomCardProps> = ({
         <div
           className={`flex items-center gap-0.5 text-xs font-bold transition-transform shrink-0 ${
             room.isPrivate && !isUnlocked
-              ? 'text-amber-700 group-hover:translate-x-1'
+              ? 'text-purple-600 group-hover:translate-x-1'
               : 'text-orange-600 group-hover:translate-x-1'
           }`}
         >
-          <span>{room.isPrivate && !isUnlocked ? 'Enter Code' : 'Enter'}</span>
+          <span>{room.isPrivate && !isUnlocked ? 'View Room' : 'Enter'}</span>
           <ChevronRight className="w-4 h-4" />
         </div>
       </div>

@@ -123,13 +123,13 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
 
             <div className="flex items-center gap-2.5">
               <div className="w-10 h-10 rounded-xl bg-orange-500/20 text-orange-400 border border-orange-500/30 flex items-center justify-center font-bold text-sm shrink-0">
-                {partnerUsername ? partnerUsername.slice(0, 2).toUpperCase() : '💬'}
+                {partnerUsername ? (cleanPartner === 'muhammedrafii2002' ? '👨‍💻' : partnerUsername.slice(0, 2).toUpperCase()) : '💬'}
               </div>
               <div>
                 <h3 className="font-extrabold text-white text-base flex items-center gap-1.5">
                   {partnerUsername ? (
                     <>
-                      <span>@{partnerUsername}</span>
+                      <span>{cleanPartner === 'muhammedrafii2002' ? 'Developer (@developer)' : `@${partnerUsername}`}</span>
                       {partnerBadge && (
                         <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
                           {partnerBadge}
@@ -180,7 +180,7 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
                     <div>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="font-extrabold text-sm text-white">
-                          Muhammed Rafi (Lead Dev)
+                          Developer
                         </span>
                         <span className="text-[10px] font-black px-2 py-0.5 rounded bg-orange-500/30 text-orange-200 border border-orange-400/50 flex items-center gap-1">
                           📌 Lead Developer
@@ -239,6 +239,7 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
                 </h4>
                 <div className="space-y-2">
                   {filteredConversations.map((username) => {
+                    const isDev = username.toLowerCase() === 'muhammedrafii2002';
                     const memberInfo = availableMembers.find((m) => m.username === username);
                     const userMsgs = messages.filter(
                       (m) =>
@@ -258,8 +259,12 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="relative">
-                            <div className="w-10 h-10 rounded-xl bg-slate-800 text-orange-400 font-bold flex items-center justify-center text-xs border border-slate-700 shrink-0">
-                              {username.slice(0, 2).toUpperCase()}
+                            <div className={`w-10 h-10 rounded-xl font-bold flex items-center justify-center text-xs border shrink-0 ${
+                              isDev
+                                ? 'bg-gradient-to-tr from-orange-600 to-amber-500 text-white border-orange-400/40'
+                                : 'bg-slate-800 text-orange-400 border-slate-700'
+                            }`}>
+                              {isDev ? '👨‍💻' : username.slice(0, 2).toUpperCase()}
                             </div>
                             {unreadCount > 0 && (
                               <span className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full border-2 border-slate-900" />
@@ -268,13 +273,17 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5">
                               <span className="font-bold text-sm text-white group-hover:text-orange-400 transition truncate">
-                                @{username}
+                                {isDev ? 'Developer' : `@${username}`}
                               </span>
-                              {memberInfo?.badge && (
+                              {isDev ? (
+                                <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-orange-500/20 text-orange-300 border border-orange-500/40 shrink-0">
+                                  ⚡ Lead Dev
+                                </span>
+                              ) : memberInfo?.badge ? (
                                 <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
                                   {memberInfo.badge}
                                 </span>
-                              )}
+                              ) : null}
                             </div>
                             <p className={`text-xs truncate mt-0.5 ${unreadCount > 0 ? 'text-emerald-400 font-semibold' : 'text-slate-400'}`}>
                               {lastMsg ? lastMsg.content : 'Tap to open private chat...'}
@@ -306,6 +315,7 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {filteredMembers.map((member) => {
+                    const isDev = member.username.toLowerCase() === 'muhammedrafii2002';
                     const memberUnreadCount = messages.filter(
                       (m) => m.senderUsername === member.username && m.recipientUsername === currentUser.username && !m.isRead
                     ).length;
@@ -318,16 +328,25 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
                           <div className="relative">
-                            <div className="w-8 h-8 rounded-lg bg-orange-500/10 text-orange-400 font-bold flex items-center justify-center text-xs border border-orange-500/20 shrink-0">
-                              {member.username.slice(0, 2).toUpperCase()}
+                            <div className={`w-8 h-8 rounded-lg font-bold flex items-center justify-center text-xs border shrink-0 ${
+                              isDev
+                                ? 'bg-gradient-to-tr from-orange-600 to-amber-500 text-white border-orange-400/40'
+                                : 'bg-orange-500/10 text-orange-400 border-orange-500/20'
+                            }`}>
+                              {isDev ? '👨‍💻' : member.username.slice(0, 2).toUpperCase()}
                             </div>
                             {memberUnreadCount > 0 && (
                               <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full border-2 border-slate-900" />
                             )}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="font-bold text-xs text-slate-200 group-hover:text-orange-400 transition truncate">
-                              @{member.username}
+                            <div className="font-bold text-xs text-slate-200 group-hover:text-orange-400 transition truncate flex items-center gap-1">
+                              <span>{isDev ? 'Developer' : `@${member.username}`}</span>
+                              {isDev && (
+                                <span className="text-[8px] font-black px-1 rounded bg-orange-500/20 text-orange-300 border border-orange-500/30">
+                                  Lead Dev
+                                </span>
+                              )}
                             </div>
                             {member.displayName && (
                               <div className="text-[10px] text-slate-400 truncate">
@@ -388,7 +407,7 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
               {isPartnerKnown ? (
                 <div className="bg-slate-900/60 rounded-xl border border-slate-800 p-3 text-center text-xs text-slate-400 max-w-sm mx-auto my-2">
                   <ShieldCheck className="w-4 h-4 text-emerald-400 mx-auto mb-1" />
-                  <span>You are chatting privately with <strong className="text-white">@{partnerUsername}</strong>. Messages are private to you both.</span>
+                  <span>You are chatting privately with <strong className="text-white">{cleanPartner === 'muhammedrafii2002' ? 'Developer' : `@${partnerUsername}`}</strong>. Messages are private to you both.</span>
                 </div>
               ) : (
                 <div className="bg-rose-950/40 border border-rose-800/60 rounded-xl p-3 text-center text-xs text-rose-300 max-w-md mx-auto my-2 space-y-1">
@@ -409,13 +428,14 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
                     {inChatSearch
                       ? `No chat messages matched "${inChatSearch}"`
                       : isPartnerKnown
-                      ? `No private messages yet. Say hi to @${partnerUsername}!`
+                      ? `No private messages yet. Say hi to ${cleanPartner === 'muhammedrafii2002' ? 'Developer' : `@${partnerUsername}`}!`
                       : `No conversation found.`}
                   </p>
                 </div>
               ) : (
                 displayedChatMessages.map((msg) => {
                   const isMe = msg.senderUsername.toLowerCase() === currentUser.username.toLowerCase();
+                  const isDevSender = msg.senderUsername.toLowerCase() === 'muhammedrafii2002';
                   return (
                     <div
                       key={msg.id}
@@ -430,7 +450,7 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
                       >
                         <div className="flex items-center justify-between gap-2 mb-1 border-b border-white/10 pb-1">
                           <span className={`font-bold text-[10px] ${isMe ? 'text-orange-100' : 'text-orange-400'}`}>
-                            {isMe ? 'You' : `@${msg.senderUsername}`}
+                            {isMe ? 'You' : isDevSender ? 'Developer ⚡' : `@${msg.senderUsername}`}
                           </span>
                           <div className="flex items-center gap-1.5">
                             <span

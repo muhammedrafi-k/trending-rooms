@@ -69,6 +69,7 @@ interface LiveRoomViewProps {
   onUpdateRoom?: (roomId: string, updates: Partial<TrendingRoom>) => void;
   onJoinRoom?: (roomId: string) => void;
   onLeaveRoom?: (roomId: string) => void;
+  onDeleteRoom?: (roomId: string) => void;
 }
 
 export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
@@ -93,6 +94,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
   onUpdateRoom,
   onJoinRoom,
   onLeaveRoom,
+  onDeleteRoom,
 }) => {
   const [inputText, setInputText] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -107,11 +109,18 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
   const [mentionFilter, setMentionFilter] = useState('');
   const [deletionReasonInput, setDeletionReasonInput] = useState('');
   const [showDeletionModal, setShowDeletionModal] = useState(false);
+  const [showDirectDeleteModal, setShowDirectDeleteModal] = useState(false);
   const [showMembersModal, setShowMembersModal] = useState(false);
   const [showRoomLogsModal, setShowRoomLogsModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showLeaveConfirmModal, setShowLeaveConfirmModal] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [activeMessageMenuId, setActiveMessageMenuId] = useState<string | null>(null);
+
+  // Private room unlock state
+  const [privateCodeInput, setPrivateCodeInput] = useState('');
+  const [privateCodeError, setPrivateCodeError] = useState('');
+  const [isLocallyUnlocked, setIsLocallyUnlocked] = useState(false);
 
   // Edit Room Details State
   const [showEditRoomModal, setShowEditRoomModal] = useState(false);
@@ -145,6 +154,13 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
     isCreator ||
     (Array.isArray(room.activeMembers) && room.activeMembers.includes(currentUser.username)) ||
     (Array.isArray(room.allowedUsers) && room.allowedUsers.includes(currentUser.username));
+
+  const hasFullAccess =
+    !room.isPrivate ||
+    isCreator ||
+    currentUser.isAdmin ||
+    isUserJoined ||
+    isLocallyUnlocked;
 
   const isPromotedAdmin = Boolean(room.roomAdmins?.includes(currentUser.username));
   const isRoomAdmin = currentUser.isAdmin || isCreator || isPromotedAdmin;
@@ -229,6 +245,25 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
     setShowEditRoomModal(true);
   };
 
+  const handleUnlockPrivateRoom = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const cleanInput = privateCodeInput.trim().toUpperCase();
+    const cleanInvite = (room.inviteCode || '').trim().toUpperCase();
+
+    if (!cleanInput) {
+      setPrivateCodeError('Please enter the room invite code.');
+      return;
+    }
+
+    if (cleanInvite && cleanInput === cleanInvite) {
+      setIsLocallyUnlocked(true);
+      setPrivateCodeError('');
+      onJoinRoom?.(room.id);
+    } else {
+      setPrivateCodeError('Incorrect invite code. Please check with the room host.');
+    }
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setInputText(val);
@@ -294,22 +329,26 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
       <span className="leading-relaxed">
         {parts.map((part, i) => {
           if (part.startsWith('@')) {
-            const handle = part.slice(1);
+            const rawHandle = part.slice(1);
+            const isDevMention = rawHandle.toLowerCase() === 'muhammedrafii2002' || rawHandle.toLowerCase() === 'developer';
+            const displayLabel = isDevMention ? '@developer' : part;
+            const targetHandle = isDevMention ? 'muhammedrafii2002' : rawHandle;
+
             return (
               <button
                 key={i}
                 type="button"
                 onClick={() => {
                   if (onSelectUser) {
-                    onSelectUser(handle);
+                    onSelectUser(targetHandle);
                   } else {
-                    onOpenPrivateChat?.(handle);
+                    onOpenPrivateChat?.(targetHandle);
                   }
                 }}
                 className="inline-flex items-center gap-0.5 px-1.5 py-0.2 mx-0.5 bg-orange-500/20 hover:bg-orange-500/40 text-orange-300 font-bold rounded-md border border-orange-500/30 text-xs transition cursor-pointer active:scale-95"
-                title={`View profile details for @${handle}`}
+                title={isDevMention ? 'View Developer Profile' : `View profile details for @${rawHandle}`}
               >
-                {part}
+                {displayLabel}
               </button>
             );
           }
@@ -399,7 +438,8 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
             {!isCreator && (
               isUserJoined ? (
                 <button
-                  onClick={() => onLeaveRoom?.(room.id)}
+                  type="button"
+                  onClick={() => setShowLeaveConfirmModal(true)}
                   className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-red-950/60 text-slate-300 hover:text-red-400 text-xs font-bold border border-slate-700 transition cursor-pointer"
                   title="Leave room"
                 >
@@ -408,6 +448,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                 </button>
               ) : (
                 <button
+                  type="button"
                   onClick={() => onJoinRoom?.(room.id)}
                   className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md transition active:scale-95 cursor-pointer"
                   title="Join room"
@@ -421,6 +462,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
             {/* 3-Dot Menu */}
             <div className="relative shrink-0">
               <button
+                type="button"
                 onClick={() => setShowMoreMenu(!showMoreMenu)}
                 className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 transition border border-slate-700 flex items-center justify-center cursor-pointer"
                 title="More Room Options"
@@ -439,9 +481,10 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                     {!isCreator && (
                       isUserJoined ? (
                         <button
+                          type="button"
                           onClick={() => {
                             setShowMoreMenu(false);
-                            onLeaveRoom?.(room.id);
+                            setShowLeaveConfirmModal(true);
                           }}
                           className="w-full px-3.5 py-2.5 hover:bg-red-950/60 text-left flex items-center gap-2 text-red-400 transition cursor-pointer"
                         >
@@ -450,6 +493,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                         </button>
                       ) : (
                         <button
+                          type="button"
                           onClick={() => {
                             setShowMoreMenu(false);
                             onJoinRoom?.(room.id);
@@ -465,6 +509,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                     {/* Edit Room Details Option */}
                     {canUserEditRoom && (
                       <button
+                        type="button"
                         onClick={() => {
                           setShowMoreMenu(false);
                           handleOpenEditModal();
@@ -478,6 +523,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
 
                     {/* Active Members Option */}
                     <button
+                      type="button"
                       onClick={() => {
                         setShowMoreMenu(false);
                         setShowMembersModal(true);
@@ -490,6 +536,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
 
                     {/* Room Activity Log Option */}
                     <button
+                      type="button"
                       onClick={() => {
                         setShowMoreMenu(false);
                         setShowRoomLogsModal(true);
@@ -502,6 +549,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
 
                     {/* Share Room Option */}
                     <button
+                      type="button"
                       onClick={() => {
                         setShowMoreMenu(false);
                         setShowShareModal(true);
@@ -514,6 +562,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
 
                     {/* Report Room Option */}
                     <button
+                      type="button"
                       onClick={() => {
                         setShowMoreMenu(false);
                         onReportItem('room', room.id, room.title);
@@ -524,9 +573,25 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                       <span>Report Room</span>
                     </button>
 
-                    {/* Request Room Deletion Option (For Room Admin) */}
-                    {isRoomAdmin && (
+                    {/* Direct Delete Room Option (For Room Creator & Global Admin) */}
+                    {(isCreator || currentUser.isAdmin) && (
                       <button
+                        type="button"
+                        onClick={() => {
+                          setShowMoreMenu(false);
+                          setShowDirectDeleteModal(true);
+                        }}
+                        className="w-full px-3.5 py-2.5 hover:bg-red-950/60 hover:text-red-300 text-left flex items-center gap-2 text-red-400 font-bold transition border-t border-slate-800 cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4 text-red-400 shrink-0" />
+                        <span>Delete Room</span>
+                      </button>
+                    )}
+
+                    {/* Request Room Deletion Option (For Promoted Room Moderators/Admins) */}
+                    {isRoomAdmin && !isCreator && !currentUser.isAdmin && (
+                      <button
+                        type="button"
                         onClick={() => {
                           setShowMoreMenu(false);
                           setShowDeletionModal(true);
@@ -537,6 +602,16 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                         <span>Request Room Deletion</span>
                       </button>
                     )}
+
+                    {/* Close Option */}
+                    <button
+                      type="button"
+                      onClick={() => setShowMoreMenu(false)}
+                      className="w-full px-3.5 py-2 hover:bg-slate-800 text-left flex items-center gap-2 text-slate-400 border-t border-slate-800 transition cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5 shrink-0" />
+                      <span>Close Menu</span>
+                    </button>
                   </div>
                 </>
               )}
@@ -569,200 +644,288 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
 
       {/* MESSAGES LIST */}
       <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 sm:space-y-4">
-        {/* Creator / Pinned Message Banner if exists */}
-        {room.pinnedMessageId && (
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3 flex items-center justify-between gap-2 text-xs text-amber-200">
-            <div className="flex items-center gap-2 min-w-0">
-              <Pin className="w-4 h-4 text-amber-400 shrink-0" />
-              <span className="font-bold text-amber-300 shrink-0">Pinned:</span>
-              <span className="truncate">
-                {messages.find((m) => m.id === room.pinnedMessageId)?.content || 'Pinned notice'}
-              </span>
+        {/* If private room and user does not have full access yet, show private gate */}
+        {room.isPrivate && !hasFullAccess ? (
+          <div className="my-auto py-10 flex flex-col items-center justify-center text-center space-y-5 px-4 max-w-md mx-auto">
+            <div className="w-16 h-16 rounded-3xl bg-purple-500/10 border-2 border-purple-500/30 text-purple-400 flex items-center justify-center shadow-lg shadow-purple-500/10">
+              <Lock className="w-8 h-8 text-purple-400" />
             </div>
-            {canUserPinMessages && (
-              <button
-                onClick={() => onPinMessage?.(room.id, null)}
-                className="text-[10px] text-amber-400 hover:underline shrink-0 font-bold"
-              >
-                Unpin
-              </button>
-            )}
-          </div>
-        )}
 
-        {messages.length === 0 && (
-          <div className="text-center py-12 text-slate-500 space-y-2">
-            <div className="text-3xl">💬</div>
-            <p className="text-xs font-semibold text-slate-400">
-              No messages in this room yet.
-            </p>
-            <p className="text-[11px] text-slate-500">
-              {isUserJoined
-                ? 'Say hello and start the campus conversation!'
-                : 'Click Join Room below to send the first message.'}
-            </p>
-          </div>
-        )}
+            <div className="space-y-2">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 text-xs font-black">
+                <span>🔒 Private Campus Room</span>
+              </div>
+              <h3 className="text-lg font-black text-white">
+                Access Code Required
+              </h3>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                {room.description || 'This is a private discussion room. An invite code is required to read messages and join.'}
+              </p>
+              <p className="text-[11px] text-slate-400">
+                You can view room details and active members below, but messages are locked.
+              </p>
+            </div>
 
-        {messages.map((msg) => {
-          const isMe = msg.senderUsername === currentUser.username;
-          const isMsgCreator = room.creatorUsername === msg.senderUsername;
-          const isPinned = room.pinnedMessageId === msg.id;
-
-          return (
-            <div
-              key={msg.id}
-              className={`flex gap-2.5 sm:gap-3 group ${isMe ? 'flex-row-reverse' : ''}`}
-            >
-              {/* Avatar */}
-              <div
-                onClick={() => {
-                  if (!msg.isAnonymous && msg.senderUsername && onSelectUser) {
-                    onSelectUser(msg.senderUsername);
-                  }
-                }}
-                className={`w-8 h-8 sm:w-9 sm:h-9 rounded-2xl flex items-center justify-center text-xs font-black shrink-0 ${
-                  msg.isAnonymous
-                    ? 'bg-purple-950 text-purple-400 border border-purple-700/50'
-                    : isMe
-                    ? 'bg-orange-600 text-white shadow-md cursor-pointer'
-                    : 'bg-slate-800 text-orange-400 border border-slate-700 cursor-pointer hover:border-orange-500'
-                }`}
-                title={msg.isAnonymous ? 'Anonymous Member' : `View @${msg.senderUsername}`}
-              >
-                {msg.isAnonymous ? '🕵️' : (msg.senderName?.charAt(0) || 'U')}
+            {/* Code Input Form */}
+            <form onSubmit={handleUnlockPrivateRoom} className="w-full space-y-3">
+              <div className="relative">
+                <input
+                  id="private-room-code-input"
+                  type="text"
+                  value={privateCodeInput}
+                  onChange={(e) => {
+                    setPrivateCodeInput(e.target.value);
+                    setPrivateCodeError('');
+                  }}
+                  placeholder="Enter Room Code (e.g. PRV-XXXXXX)"
+                  className="w-full px-4 py-3 bg-slate-950 border border-purple-500/40 rounded-2xl text-center text-sm font-mono font-bold tracking-widest text-amber-300 placeholder:text-slate-600 placeholder:tracking-normal placeholder:font-sans focus:outline-none focus:border-purple-400 shadow-inner uppercase"
+                />
               </div>
 
-              {/* Message Content Bubble */}
-              <div
-                className={`max-w-[82%] sm:max-w-[75%] rounded-2xl p-3.5 relative shadow-sm ${
-                  isMe
-                    ? 'bg-orange-600/90 text-white rounded-tr-none border border-orange-500/40'
-                    : 'bg-slate-800/90 text-slate-100 rounded-tl-none border border-slate-700/80'
-                }`}
+              {privateCodeError && (
+                <p className="text-xs font-bold text-red-400 flex items-center justify-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>{privateCodeError}</span>
+                </p>
+              )}
+
+              <button
+                type="submit"
+                className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs rounded-2xl shadow-lg shadow-purple-600/30 transition cursor-pointer flex items-center justify-center gap-2 active:scale-95"
               >
-                {/* Header info */}
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span
-                      onClick={() => {
-                        if (!msg.isAnonymous && msg.senderUsername && onSelectUser) {
-                          onSelectUser(msg.senderUsername);
-                        }
-                      }}
-                      className={`text-xs font-black ${
-                        isMe ? 'text-white' : 'text-orange-400 hover:underline cursor-pointer'
-                      }`}
-                    >
-                      {msg.senderName}
-                    </span>
+                <Lock className="w-4 h-4" />
+                <span>Unlock & Join Room</span>
+              </button>
+            </form>
 
-                    {isMsgCreator && (
-                      <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-200 border border-amber-500/40 flex items-center gap-0.5">
-                        <Crown className="w-2.5 h-2.5 text-amber-400" /> Host
-                      </span>
-                    )}
-
-                    {msg.senderBadge && (
-                      <span className="text-[9px] font-semibold opacity-75">
-                        {msg.senderBadge}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1">
-                    <span className="text-[10px] opacity-60 font-mono">
-                      {formatRelativeTime(msg.timestamp)}
-                    </span>
-
-                    {/* Action button */}
-                    <div className="relative">
-                      <button
-                        onClick={() =>
-                          setActiveMessageMenuId(
-                            activeMessageMenuId === msg.id ? null : msg.id
-                          )
-                        }
-                        className="opacity-0 group-hover:opacity-100 transition p-1 hover:bg-black/20 rounded text-slate-400 hover:text-white cursor-pointer"
-                      >
-                        <MoreVertical className="w-3.5 h-3.5" />
-                      </button>
-
-                      {activeMessageMenuId === msg.id && (
-                        <>
-                          <div
-                            className="fixed inset-0 z-40"
-                            onClick={() => setActiveMessageMenuId(null)}
-                          />
-                          <div className="absolute right-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-xl py-1 z-50 text-xs w-40">
-                            {!msg.isAnonymous && msg.senderUsername && (
-                              <button
-                                onClick={() => {
-                                  setActiveMessageMenuId(null);
-                                  onSelectUser?.(msg.senderUsername!);
-                                }}
-                                className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-slate-200 flex items-center gap-1.5"
-                              >
-                                <span>👤 View Profile</span>
-                              </button>
-                            )}
-
-                            {!isMe && !msg.isAnonymous && msg.senderUsername && onOpenPrivateChat && (
-                              <button
-                                onClick={() => {
-                                  setActiveMessageMenuId(null);
-                                  onOpenPrivateChat(msg.senderUsername!);
-                                }}
-                                className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-orange-400 flex items-center gap-1.5"
-                              >
-                                <span>💬 Direct Message</span>
-                              </button>
-                            )}
-
-                            {canUserPinMessages && (
-                              <button
-                                onClick={() => {
-                                  setActiveMessageMenuId(null);
-                                  onPinMessage?.(room.id, isPinned ? null : msg.id);
-                                }}
-                                className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-amber-300 flex items-center gap-1.5"
-                              >
-                                <Pin className="w-3.5 h-3.5" />
-                                <span>{isPinned ? 'Unpin' : 'Pin to Top'}</span>
-                              </button>
-                            )}
-
-                            {(isMe || canUserDeleteMessages) && (
-                              <button
-                                onClick={() => {
-                                  setActiveMessageMenuId(null);
-                                  onDeleteMessage(msg.id);
-                                }}
-                                className="w-full px-3 py-1.5 text-left hover:bg-red-950/60 text-red-400 flex items-center gap-1.5"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                                <span>Delete Message</span>
-                              </button>
-                            )}
-
-                            <button
-                              onClick={() => {
-                                setActiveMessageMenuId(null);
-                                onReportItem('message', msg.id, msg.content);
-                              }}
-                              className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-slate-400 hover:text-red-400 flex items-center gap-1.5"
-                            >
-                              <AlertTriangle className="w-3.5 h-3.5" />
-                              <span>Report</span>
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
+            {/* Quick action to view members */}
+            <button
+              type="button"
+              onClick={() => setShowMembersModal(true)}
+              className="text-xs text-slate-400 hover:text-emerald-400 font-semibold flex items-center gap-1.5 transition cursor-pointer pt-2"
+            >
+              <Users className="w-4 h-4 text-emerald-400" />
+              <span>View Room Members ({activeMembersList.length})</span>
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Creator / Pinned Message Banner if exists */}
+            {room.pinnedMessageId && (
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3 flex items-center justify-between gap-2 text-xs text-amber-200">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Pin className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span className="font-bold text-amber-300 shrink-0">Pinned:</span>
+                  <span className="truncate">
+                    {messages.find((m) => m.id === room.pinnedMessageId)?.content || 'Pinned notice'}
+                  </span>
                 </div>
+                {canUserPinMessages && (
+                  <button
+                    type="button"
+                    onClick={() => onPinMessage?.(room.id, null)}
+                    className="text-[10px] text-amber-400 hover:underline shrink-0 font-bold"
+                  >
+                    Unpin
+                  </button>
+                )}
+              </div>
+            )}
 
-                {/* Message Body */}
+            {messages.length === 0 && (
+              <div className="text-center py-12 text-slate-500 space-y-2">
+                <div className="text-3xl">💬</div>
+                <p className="text-xs font-semibold text-slate-400">
+                  No messages in this room yet.
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  {isUserJoined
+                    ? 'Say hello and start the campus conversation!'
+                    : 'Click Join Room below to send the first message.'}
+                </p>
+              </div>
+            )}
+
+            {messages.map((msg) => {
+              const isMe = msg.senderUsername === currentUser.username;
+              const isMsgCreator = room.creatorUsername === msg.senderUsername;
+              const isPinned = room.pinnedMessageId === msg.id;
+              const isDevSender = msg.senderUsername === 'muhammedrafii2002' || (!msg.isAnonymous && msg.senderName?.includes('Muhammed Rafi'));
+              const senderDisplayName = isDevSender ? 'Developer' : msg.senderName;
+              const senderBadge = isDevSender ? '⚡ Developer' : msg.senderBadge;
+
+              return (
+                <div
+                  key={msg.id}
+                  className={`flex gap-2.5 sm:gap-3 group ${isMe ? 'flex-row-reverse' : ''}`}
+                >
+                  {/* Avatar */}
+                  <div
+                    onClick={() => {
+                      if (!msg.isAnonymous && msg.senderUsername && onSelectUser) {
+                        onSelectUser(msg.senderUsername);
+                      }
+                    }}
+                    className={`w-8 h-8 sm:w-9 sm:h-9 rounded-2xl flex items-center justify-center text-xs font-black shrink-0 ${
+                      msg.isAnonymous
+                        ? 'bg-purple-950 text-purple-400 border border-purple-700/50'
+                        : isMe
+                        ? 'bg-orange-600 text-white shadow-md cursor-pointer'
+                        : isDevSender
+                        ? 'bg-gradient-to-tr from-orange-600 to-amber-500 text-white shadow-md cursor-pointer border border-orange-400/40'
+                        : 'bg-slate-800 text-orange-400 border border-slate-700 cursor-pointer hover:border-orange-500'
+                    }`}
+                    title={msg.isAnonymous ? 'Anonymous Member' : `View @${msg.senderUsername}`}
+                  >
+                    {msg.isAnonymous ? '🕵️' : isDevSender ? '👨‍💻' : (senderDisplayName?.charAt(0) || 'U')}
+                  </div>
+
+                  {/* Message Content Bubble */}
+                  <div
+                    className={`max-w-[82%] sm:max-w-[75%] rounded-2xl p-3.5 relative shadow-sm ${
+                      isMe
+                        ? 'bg-orange-600/90 text-white rounded-tr-none border border-orange-500/40'
+                        : 'bg-slate-800/90 text-slate-100 rounded-tl-none border border-slate-700/80'
+                    }`}
+                  >
+                    {/* Header info */}
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span
+                          onClick={() => {
+                            if (!msg.isAnonymous && msg.senderUsername && onSelectUser) {
+                              onSelectUser(msg.senderUsername);
+                            }
+                          }}
+                          className={`text-xs font-black ${
+                            isMe ? 'text-white' : 'text-orange-400 hover:underline cursor-pointer'
+                          }`}
+                        >
+                          {senderDisplayName}
+                        </span>
+
+                        {isMsgCreator && (
+                          <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-200 border border-amber-500/40 flex items-center gap-0.5">
+                            <Crown className="w-2.5 h-2.5 text-amber-400" /> Host
+                          </span>
+                        )}
+
+                        {senderBadge && (
+                          <span className="text-[9px] font-semibold opacity-75">
+                            {senderBadge}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] opacity-60 font-mono">
+                          {formatRelativeTime(msg.timestamp)}
+                        </span>
+
+                        {/* Action button */}
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setActiveMessageMenuId(
+                                activeMessageMenuId === msg.id ? null : msg.id
+                              )
+                            }
+                            className="opacity-0 group-hover:opacity-100 transition p-1 hover:bg-black/20 rounded text-slate-400 hover:text-white cursor-pointer"
+                          >
+                            <MoreVertical className="w-3.5 h-3.5" />
+                          </button>
+
+                          {activeMessageMenuId === msg.id && (
+                            <>
+                              <div
+                                className="fixed inset-0 z-40"
+                                onClick={() => setActiveMessageMenuId(null)}
+                              />
+                              <div className="absolute right-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-xl py-1 z-50 text-xs w-40">
+                                {!msg.isAnonymous && msg.senderUsername && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveMessageMenuId(null);
+                                      onSelectUser?.(msg.senderUsername!);
+                                    }}
+                                    className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-slate-200 flex items-center gap-1.5 cursor-pointer"
+                                  >
+                                    <span>👤 View Profile</span>
+                                  </button>
+                                )}
+
+                                {!isMe && !msg.isAnonymous && msg.senderUsername && onOpenPrivateChat && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveMessageMenuId(null);
+                                      onOpenPrivateChat(msg.senderUsername!);
+                                    }}
+                                    className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-orange-400 flex items-center gap-1.5 cursor-pointer"
+                                  >
+                                    <span>💬 Direct Message</span>
+                                  </button>
+                                )}
+
+                                {canUserPinMessages && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveMessageMenuId(null);
+                                      onPinMessage?.(room.id, isPinned ? null : msg.id);
+                                    }}
+                                    className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-amber-300 flex items-center gap-1.5 cursor-pointer"
+                                  >
+                                    <Pin className="w-3.5 h-3.5" />
+                                    <span>{isPinned ? 'Unpin' : 'Pin to Top'}</span>
+                                  </button>
+                                )}
+
+                                {(isMe || canUserDeleteMessages) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveMessageMenuId(null);
+                                      onDeleteMessage(msg.id);
+                                    }}
+                                    className="w-full px-3 py-1.5 text-left hover:bg-red-950/60 text-red-400 flex items-center gap-1.5 cursor-pointer"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>Delete Message</span>
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveMessageMenuId(null);
+                                    onReportItem('message', msg.id, msg.content);
+                                  }}
+                                  className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-slate-400 hover:text-red-400 flex items-center gap-1.5 cursor-pointer"
+                                >
+                                  <AlertTriangle className="w-3.5 h-3.5" />
+                                  <span>Report</span>
+                                </button>
+
+                                {/* Close Button */}
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveMessageMenuId(null)}
+                                  className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-slate-400 flex items-center gap-1.5 border-t border-slate-800 font-semibold cursor-pointer"
+                                >
+                                  <X className="w-3 h-3" />
+                                  <span>Close</span>
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Message Body */}
                 <div className="text-xs sm:text-sm whitespace-pre-wrap break-words">
                   {renderMessageContent(msg.content)}
                 </div>
@@ -856,6 +1019,8 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
             </div>
           );
         })}
+        </>
+      )}
 
         <div ref={chatEndRef} />
       </div>
@@ -1021,6 +1186,34 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
             </button>
           </div>
         </form>
+      ) : room.isPrivate && !hasFullAccess ? (
+        /* PRIVATE LOCKED BANNER: Requires code to message */
+        <div className="bg-slate-900 border-t border-slate-800 p-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-purple-500/20 text-purple-400 border border-purple-500/30 flex items-center justify-center font-bold shrink-0">
+              <Lock className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-extrabold text-white">
+                Private Room • Code Required to Chat
+              </h4>
+              <p className="text-[11px] text-slate-400">
+                Enter the room invite code to unlock messages and send live chats.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const inputEl = document.getElementById('private-room-code-input');
+              inputEl?.focus();
+            }}
+            className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs shadow-md transition active:scale-95 flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+          >
+            <Lock className="w-4 h-4" />
+            <span>Enter Code to Join</span>
+          </button>
+        </div>
       ) : (
         /* NOT JOINED BANNER: Requires Join to Message */
         <div className="bg-slate-900 border-t border-slate-800 p-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left shrink-0">
@@ -1379,6 +1572,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
               {activeMembersList.map((username) => {
                 const isMemberCreator = room.creatorUsername === username;
                 const isMemberAdmin = room.roomAdmins?.includes(username);
+                const isDevMember = username === 'muhammedrafii2002';
 
                 return (
                   <div
@@ -1397,15 +1591,24 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                       className="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0"
                     >
                       <div className={`w-8 h-8 rounded-xl font-bold flex items-center justify-center text-xs border shrink-0 hover:scale-105 transition ${
-                        isMemberCreator
+                        isDevMember
+                          ? 'bg-gradient-to-tr from-orange-600 to-amber-500 text-white border-orange-400/40'
+                          : isMemberCreator
                           ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
                           : 'bg-orange-500/20 text-orange-400 border-orange-500/30'
                       }`}>
-                        {username.slice(0, 2).toUpperCase()}
+                        {isDevMember ? '👨‍💻' : username.slice(0, 2).toUpperCase()}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="font-bold text-xs text-white flex items-center gap-1.5 flex-wrap">
-                          <span className="hover:text-orange-400 transition truncate">@{username}</span>
+                          <span className="hover:text-orange-400 transition truncate">
+                            {isDevMember ? 'Developer' : `@${username}`}
+                          </span>
+                          {isDevMember && (
+                            <span className="px-1.5 py-0.5 bg-gradient-to-r from-orange-500/20 to-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-[9px] font-black flex items-center gap-1 shrink-0 shadow-sm">
+                              ⚡ Lead Dev
+                            </span>
+                          )}
                           {isMemberCreator && (
                             <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-[9px] font-black flex items-center gap-1 shrink-0 shadow-sm">
                               <Crown className="w-3 h-3 text-amber-400" /> Room Owner
@@ -1580,19 +1783,112 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
             />
             <div className="flex justify-end gap-2">
               <button
+                type="button"
                 onClick={() => setShowDeletionModal(false)}
-                className="px-4 py-2 text-xs text-slate-400 hover:text-white"
+                className="px-4 py-2 text-xs text-slate-400 hover:text-white cursor-pointer"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={() => {
                   onRequestRoomDeletion(room.id, deletionReasonInput || 'Host requested deletion.');
                   setShowDeletionModal(false);
                 }}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl"
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl cursor-pointer"
               >
                 Submit Request
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Leave Room Confirmation Modal */}
+      {showLeaveConfirmModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowLeaveConfirmModal(false);
+          }}
+        >
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 space-y-4 text-slate-100 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-400 flex items-center justify-center mx-auto">
+              <LogOut className="w-6 h-6" />
+            </div>
+
+            <div className="text-center space-y-1.5">
+              <h3 className="font-extrabold text-base text-white">Leave Room?</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Are you sure you want to leave <span className="text-orange-400 font-bold">"{room.title}"</span>? You will stop receiving live notifications from this room.
+              </p>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowLeaveConfirmModal(false)}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLeaveConfirmModal(false);
+                  onLeaveRoom?.(room.id);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-extrabold text-xs shadow-md shadow-red-600/30 transition cursor-pointer active:scale-95"
+              >
+                Yes, Leave Room
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Direct Delete Room Confirmation Modal (For Room Creator & Admin) */}
+      {showDirectDeleteModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowDirectDeleteModal(false);
+          }}
+        >
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 space-y-4 text-slate-100 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-400 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <div className="text-center space-y-1.5">
+              <h3 className="font-extrabold text-base text-white">Delete Room Permanently?</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Are you sure you want to delete <span className="text-orange-400 font-bold">"{room.title}"</span>? This will permanently remove the room, all live chat messages, and polls for all students.
+              </p>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowDirectDeleteModal(false)}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDirectDeleteModal(false);
+                  if (onDeleteRoom) {
+                    onDeleteRoom(room.id);
+                  } else {
+                    onRequestRoomDeletion(room.id, 'Creator deleted room.');
+                    onBack();
+                  }
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-extrabold text-xs shadow-md shadow-red-600/30 transition cursor-pointer active:scale-95"
+              >
+                Yes, Delete Room
               </button>
             </div>
           </div>
