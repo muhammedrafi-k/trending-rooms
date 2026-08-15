@@ -1098,6 +1098,30 @@ export const supabaseService = {
   },
 
   /**
+   * Update reactions on a message in Supabase
+   */
+  async updateMessageReactions(messageId: string, reactions: Record<string, number>): Promise<boolean> {
+    const supabase = getSupabaseClient();
+    if (!supabase) return false;
+
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .update({ reactions })
+        .eq('id', messageId);
+
+      if (error) {
+        console.error('Error updating reactions in Supabase:', error);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      console.error('Error updating reactions:', e);
+      return false;
+    }
+  },
+
+  /**
    * Fetch Feed Posts
    */
   async getFeedPosts(collegeId: string): Promise<FeedPost[] | null> {

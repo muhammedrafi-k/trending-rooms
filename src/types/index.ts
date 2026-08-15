@@ -91,10 +91,12 @@ export interface ChatMessage {
 
 export interface RoomLog {
   id: string;
-  roomId: string;
+  roomId?: string;
   username: string;
   displayName: string;
-  action: 'joined' | 'left' | 'created' | 'privacy_changed';
+  action: 'joined' | 'left' | 'created' | 'privacy_changed' | 'kicked';
+  targetUsername?: string;
+  details?: string;
   timestamp: string;
 }
 
@@ -102,8 +104,10 @@ export interface RoomAdminRights {
   canDeleteMessages: boolean;
   canPinMessages: boolean;
   canManagePolls: boolean;
+  canDeletePolls?: boolean;
   canChangePrivacy?: boolean;
   canEditRoom?: boolean;
+  canKickUsers?: boolean;
 }
 
 export interface TrendingRoom {

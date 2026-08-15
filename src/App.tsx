@@ -14,6 +14,7 @@ import {
   PrivateMessage,
   AppNotification,
   RoomAdminRights,
+  RoomLog,
 } from './types';
 import { COLLEGES } from './data/mockRooms';
 import { Header } from './components/Header';
@@ -336,8 +337,38 @@ export default function App() {
 
     async function fetchRoomMessages() {
       const msgs = await supabaseService.getMessages(currentRoomId!);
-      if (msgs) {
-        setMessagesMap((prev) => ({ ...prev, [currentRoomId!]: msgs }));
+      if (msgs && msgs.length > 0) {
+        setMessagesMap((prev) => {
+          const currentList = prev[currentRoomId!] || [];
+          const merged = msgs.map((incoming) => {
+            const existing = currentList.find((x) => x.id === incoming.id);
+            let result = incoming;
+            if (existing?.poll) {
+              if (!incoming.poll) {
+                result = { ...result, poll: existing.poll };
+              } else {
+                const existingVotes = existing.poll.totalVotes || 0;
+                const incomingVotes = incoming.poll.totalVotes || 0;
+                if (existingVotes > incomingVotes) {
+                  result = { ...result, poll: existing.poll };
+                }
+              }
+            }
+            if (existing?.reactions) {
+              const localTotal = Object.values(existing.reactions).reduce((a, b) => a + Number(b), 0);
+              const incomingTotal = Object.values(incoming.reactions || {}).reduce((a, b) => a + Number(b), 0);
+              if (localTotal > incomingTotal) {
+                result = { ...result, reactions: existing.reactions };
+              }
+            }
+            return result;
+          });
+          const next = { ...prev, [currentRoomId!]: merged };
+          try {
+            localStorage.setItem('TRENDING_MESSAGES_STATE_V4', JSON.stringify(next));
+          } catch (e) {}
+          return next;
+        });
       }
     }
     fetchRoomMessages();
@@ -349,22 +380,36 @@ export default function App() {
           setMessagesMap((prev) => {
             const list = prev[currentRoomId!] || [];
             if (list.some((m) => m.id === msg.id)) return prev;
-            return { ...prev, [currentRoomId!]: [...list, msg] };
+            const next = { ...prev, [currentRoomId!]: [...list, msg] };
+            try {
+              localStorage.setItem('TRENDING_MESSAGES_STATE_V4', JSON.stringify(next));
+            } catch (e) {}
+            return next;
           });
         } else if (event === 'UPDATE') {
           setMessagesMap((prev) => {
             const list = prev[currentRoomId!] || [];
-            return {
+            const next = {
               ...prev,
               [currentRoomId!]: list.map((m) => (m.id === msg.id ? msg : m)),
             };
+            try {
+              localStorage.setItem('TRENDING_MESSAGES_STATE_V4', JSON.stringify(next));
+            } catch (e) {}
+            return next;
           });
         } else if (event === 'DELETE') {
           const targetId = oldId || msg.id;
-          setMessagesMap((prev) => ({
-            ...prev,
-            [currentRoomId!]: (prev[currentRoomId!] || []).filter((m) => m.id !== targetId),
-          }));
+          setMessagesMap((prev) => {
+            const next = {
+              ...prev,
+              [currentRoomId!]: (prev[currentRoomId!] || []).filter((m) => m.id !== targetId),
+            };
+            try {
+              localStorage.setItem('TRENDING_MESSAGES_STATE_V4', JSON.stringify(next));
+            } catch (e) {}
+            return next;
+          });
         }
       }
     );
@@ -605,20 +650,25 @@ export default function App() {
         const { roomId, messageId, emoji } = payload;
         setMessagesMap((prev) => {
           const list = prev[roomId] || [];
-          return {
+          const updatedList = list.map((m) =>
+            m.id === messageId
+              ? {
+                  ...m,
+                  reactions: {
+                    ...(m.reactions || {}),
+                    [emoji]: ((m.reactions || {})[emoji] || 0) + 1,
+                  },
+                }
+              : m
+          );
+          const next = {
             ...prev,
-            [roomId]: list.map((m) =>
-              m.id === messageId
-                ? {
-                    ...m,
-                    reactions: {
-                      ...m.reactions,
-                      [emoji]: (m.reactions[emoji] || 0) + 1,
-                    },
-                  }
-                : m
-            ),
+            [roomId]: updatedList,
           };
+          try {
+            localStorage.setItem('TRENDING_MESSAGES_STATE_V4', JSON.stringify(next));
+          } catch (e) {}
+          return next;
         });
       } else if (payload.type === 'FLOATING_EMOJI') {
         const { roomId, emoji } = payload;
@@ -823,14 +873,16 @@ export default function App() {
 
   const handleDeletePoll = async (messageId: string) => {
     if (!currentRoomId) return;
-    setMessagesMap((prev) => ({
-      ...prev,
-      [currentRoomId]: (prev[currentRoomId] || []).map((m) =>
-        m.id === messageId ? { ...m, poll: undefined, content: '🗑️ [Poll Removed by Admin]' } : m
-      ),
-    }));
-    await supabaseService.deleteMessage(messageId);
-    showToast('🗑️ Poll removed.', 'info');
+    requireRegistration('manage polls', async () => {
+      setMessagesMap((prev) => ({
+        ...prev,
+        [currentRoomId]: (prev[currentRoomId] || []).map((m) =>
+          m.id === messageId ? { ...m, poll: undefined, content: '🗑️ [Poll Removed by Admin]' } : m
+        ),
+      }));
+      await supabaseService.deleteMessage(messageId);
+      showToast('🗑️ Poll removed.', 'info');
+    });
   };
 
   const handleRequestRoomDeletion = (roomId: string, reason: string) => {
@@ -922,8 +974,10 @@ export default function App() {
         canDeleteMessages: true,
         canPinMessages: true,
         canManagePolls: true,
+        canDeletePolls: true,
         canChangePrivacy: true,
         canEditRoom: true,
+        canKickUsers: true,
       };
 
       let newAdminsList: string[] = [];
@@ -1032,6 +1086,67 @@ export default function App() {
     });
   };
 
+  const handleKickUser = (roomId: string, targetUsername: string) => {
+    requireRegistration('kick users from room', () => {
+      let updatedActiveMembers: string[] = [];
+      let updatedAllowedUsers: string[] = [];
+      let updatedAdmins: string[] = [];
+      let updatedRights: Record<string, RoomAdminRights> = {};
+      let updatedRoomObj: TrendingRoom | undefined;
+
+      setRooms((prev) =>
+        prev.map((r) => {
+          if (r.id === roomId) {
+            updatedActiveMembers = (r.activeMembers || []).filter((u) => u !== targetUsername);
+            updatedAllowedUsers = (r.allowedUsers || []).filter((u) => u !== targetUsername);
+            updatedAdmins = (r.roomAdmins || []).filter((u) => u !== targetUsername);
+            updatedRights = { ...(r.roomAdminRights || {}) };
+            delete updatedRights[targetUsername];
+
+            const kickLog: RoomLog = {
+              id: `log-kick-${Date.now()}`,
+              username: currentUser.username,
+              displayName: currentUser.displayName,
+              action: 'kicked',
+              targetUsername: targetUsername,
+              timestamp: new Date().toISOString(),
+            };
+
+            const newLogs = [kickLog, ...(r.roomLogs || [])].slice(0, 50);
+
+            updatedRoomObj = {
+              ...r,
+              activeMembers: updatedActiveMembers,
+              allowedUsers: updatedAllowedUsers,
+              roomAdmins: updatedAdmins,
+              roomAdminRights: updatedRights,
+              roomLogs: newLogs,
+            };
+            return updatedRoomObj;
+          }
+          return r;
+        })
+      );
+
+      supabaseService.updateRoom(roomId, {
+        activeMembers: updatedActiveMembers,
+        allowedUsers: updatedAllowedUsers,
+        roomAdmins: updatedAdmins,
+        roomAdminRights: updatedRights,
+        roomLogs: updatedRoomObj?.roomLogs,
+      });
+
+      if (updatedRoomObj) {
+        broadcastEngine.broadcast({
+          type: 'ROOM_UPDATED',
+          room: updatedRoomObj,
+        });
+      }
+
+      showToast(`🥾 @${targetUsername} has been kicked from the room.`, 'info');
+    });
+  };
+
   const handlePinMessage = (roomId: string, messageId: string | null) => {
     requireRegistration('pin messages', () => {
       let updatedRoomObj: TrendingRoom | undefined;
@@ -1071,47 +1186,56 @@ export default function App() {
 
       setMessagesMap((prev) => {
         const list = prev[currentRoomId] || [];
-        return {
+        const updatedList = list.map((m) => {
+          if (m.id === messageId && m.poll) {
+            const currentVoter = currentUser.username;
+            
+            const newOptions = m.poll.options.map((opt) => {
+              const voters = Array.isArray(opt.voters) ? opt.voters : [];
+              const isCurrentlyVotedInThisOption = voters.includes(currentVoter);
+              if (opt.id === optionId) {
+                if (isCurrentlyVotedInThisOption) return opt;
+                return {
+                  ...opt,
+                  votes: (opt.votes || 0) + 1,
+                  voters: [...voters, currentVoter],
+                };
+              } else if (isCurrentlyVotedInThisOption) {
+                return {
+                  ...opt,
+                  votes: Math.max(0, (opt.votes || 0) - 1),
+                  voters: voters.filter((u) => u !== currentVoter),
+                };
+              }
+              return opt;
+            });
+
+            const newTotal = newOptions.reduce((sum, opt) => sum + (opt.votes || 0), 0);
+
+            updatedPollData = {
+              ...m.poll,
+              totalVotes: newTotal,
+              options: newOptions,
+            };
+
+            return {
+              ...m,
+              poll: updatedPollData,
+            };
+          }
+          return m;
+        });
+
+        const nextMap = {
           ...prev,
-          [currentRoomId]: list.map((m) => {
-            if (m.id === messageId && m.poll) {
-              const currentVoter = currentUser.username;
-              
-              const newOptions = m.poll.options.map((opt) => {
-                const isCurrentlyVotedInThisOption = (opt.voters || []).includes(currentVoter);
-                if (opt.id === optionId) {
-                  if (isCurrentlyVotedInThisOption) return opt;
-                  return {
-                    ...opt,
-                    votes: opt.votes + 1,
-                    voters: [...(opt.voters || []), currentVoter],
-                  };
-                } else if (isCurrentlyVotedInThisOption) {
-                  return {
-                    ...opt,
-                    votes: Math.max(0, opt.votes - 1),
-                    voters: (opt.voters || []).filter((u) => u !== currentVoter),
-                  };
-                }
-                return opt;
-              });
-
-              const newTotal = newOptions.reduce((sum, opt) => sum + opt.votes, 0);
-
-              updatedPollData = {
-                ...m.poll,
-                totalVotes: newTotal,
-                options: newOptions,
-              };
-
-              return {
-                ...m,
-                poll: updatedPollData,
-              };
-            }
-            return m;
-          }),
+          [currentRoomId]: updatedList,
         };
+
+        try {
+          localStorage.setItem('TRENDING_MESSAGES_STATE_V4', JSON.stringify(nextMap));
+        } catch (e) {}
+
+        return nextMap;
       });
 
       if (updatedPollData) {
@@ -1194,50 +1318,72 @@ export default function App() {
   const handleAddReactionToMessage = (messageId: string, emoji: string) => {
     if (!currentRoomId) return;
 
-    setMessagesMap((prev) => {
-      const list = prev[currentRoomId] || [];
-      return {
-        ...prev,
-        [currentRoomId]: list.map((m) =>
-          m.id === messageId
-            ? {
-                ...m,
-                reactions: {
-                  ...m.reactions,
-                  [emoji]: (m.reactions[emoji] || 0) + 1,
-                },
-              }
-            : m
-        ),
-      };
-    });
+    requireRegistration('react to messages', () => {
+      let updatedReactions: Record<string, number> | null = null;
 
-    broadcastEngine.broadcast({
-      type: 'REACTION',
-      roomId: currentRoomId,
-      messageId,
-      emoji,
+      setMessagesMap((prev) => {
+        const list = prev[currentRoomId] || [];
+        const updatedList = list.map((m) => {
+          if (m.id === messageId) {
+            const currentReactions = m.reactions || {};
+            const nextReactions = {
+              ...currentReactions,
+              [emoji]: (Number(currentReactions[emoji]) || 0) + 1,
+            };
+            updatedReactions = nextReactions;
+            return {
+              ...m,
+              reactions: nextReactions,
+            };
+          }
+          return m;
+        });
+
+        const nextMap = {
+          ...prev,
+          [currentRoomId]: updatedList,
+        };
+
+        try {
+          localStorage.setItem('TRENDING_MESSAGES_STATE_V4', JSON.stringify(nextMap));
+        } catch (e) {}
+
+        return nextMap;
+      });
+
+      if (updatedReactions) {
+        supabaseService.updateMessageReactions(messageId, updatedReactions);
+      }
+
+      broadcastEngine.broadcast({
+        type: 'REACTION',
+        roomId: currentRoomId,
+        messageId,
+        emoji,
+      });
     });
   };
 
   const handleSendFloatingEmoji = (emoji: string) => {
     if (!currentRoomId) return;
 
-    const newParticle: FloatingReaction = {
-      id: `f-${Date.now()}-${Math.random()}`,
-      emoji,
-      x: Math.floor(Math.random() * 70) + 15,
-    };
+    requireRegistration('send live reactions', () => {
+      const newParticle: FloatingReaction = {
+        id: `f-${Date.now()}-${Math.random()}`,
+        emoji,
+        x: Math.floor(Math.random() * 70) + 15,
+      };
 
-    setFloatingReactions((prev) => [...prev, newParticle]);
-    setTimeout(() => {
-      setFloatingReactions((prev) => prev.filter((p) => p.id !== newParticle.id));
-    }, 1200);
+      setFloatingReactions((prev) => [...prev, newParticle]);
+      setTimeout(() => {
+        setFloatingReactions((prev) => prev.filter((p) => p.id !== newParticle.id));
+      }, 1200);
 
-    broadcastEngine.broadcast({
-      type: 'FLOATING_EMOJI',
-      roomId: currentRoomId,
-      emoji,
+      broadcastEngine.broadcast({
+        type: 'FLOATING_EMOJI',
+        roomId: currentRoomId,
+        emoji,
+      });
     });
   };
 
@@ -1312,6 +1458,7 @@ export default function App() {
 
   const handleAddComment = async (postId: string, content: string, parentId?: string | null): Promise<FeedComment | null> => {
     if (!currentUser.isRegistered) {
+      setRequiredActionForProfile('comment on posts');
       setIsUserProfileOpen(true);
       return null;
     }
@@ -1361,6 +1508,7 @@ export default function App() {
 
   const handleLikeComment = async (commentId: string) => {
     if (!currentUser.isRegistered) {
+      setRequiredActionForProfile('like comments');
       setIsUserProfileOpen(true);
       return;
     }
@@ -1948,7 +2096,9 @@ export default function App() {
             onRequestRoomDeletion={handleRequestRoomDeletion}
             onCancelRoomDeletionRequest={handleCancelRoomDeletionRequest}
             onReportItem={(type, id, preview) =>
-              setReportTarget({ targetType: type, targetId: id, roomId: currentRoomId, contentPreview: preview })
+              requireRegistration(`report ${type || 'content'}`, () =>
+                setReportTarget({ targetType: type, targetId: id, roomId: currentRoomId, contentPreview: preview })
+              )
             }
             onAddReactionToMessage={handleAddReactionToMessage}
             onVotePoll={handleVotePoll}
@@ -1961,6 +2111,7 @@ export default function App() {
             onSelectUser={(uname) => setViewingUserProfileUsername(uname)}
             onPromoteRoomAdmin={handlePromoteRoomAdmin}
             onDemoteRoomAdmin={handleDemoteRoomAdmin}
+            onKickUser={handleKickUser}
             onPinMessage={handlePinMessage}
             onUpdateRoom={handleUpdateRoom}
             onJoinRoom={handleJoinRoom}

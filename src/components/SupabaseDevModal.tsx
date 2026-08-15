@@ -30,6 +30,11 @@ ALTER TABLE rooms ADD COLUMN IF NOT EXISTS pinned_message_id TEXT;
 ALTER TABLE rooms ADD COLUMN IF NOT EXISTS deletion_requested BOOLEAN DEFAULT FALSE;
 ALTER TABLE rooms ADD COLUMN IF NOT EXISTS deletion_reason TEXT;
 ALTER TABLE rooms ADD COLUMN IF NOT EXISTS top_contributor JSONB DEFAULT NULL;
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS has_active_poll BOOLEAN DEFAULT FALSE;
+
+-- Support for Polls & Reactions in messages
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS poll_data JSONB DEFAULT NULL;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS reactions JSONB DEFAULT '{}'::jsonb;
 
 -- Support for threaded comments & likes
 ALTER TABLE feed_comments ADD COLUMN IF NOT EXISTS parent_id TEXT REFERENCES feed_comments(id) ON DELETE CASCADE;

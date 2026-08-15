@@ -30,6 +30,7 @@ import {
   Globe,
   Key,
   RotateCcw,
+  Smile,
 } from 'lucide-react';
 import {
   TrendingRoom,
@@ -67,6 +68,7 @@ interface LiveRoomViewProps {
   onSelectUser?: (username: string) => void;
   onPromoteRoomAdmin?: (roomId: string, targetUsername: string, rights?: RoomAdminRights) => void;
   onDemoteRoomAdmin?: (roomId: string, targetUsername: string) => void;
+  onKickUser?: (roomId: string, targetUsername: string) => void;
   onPinMessage?: (roomId: string, messageId: string | null) => void;
   onUpdateRoom?: (roomId: string, updates: Partial<TrendingRoom>) => void;
   onJoinRoom?: (roomId: string, codeInput?: string) => void;
@@ -93,6 +95,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
   onSelectUser,
   onPromoteRoomAdmin,
   onDemoteRoomAdmin,
+  onKickUser,
   onPinMessage,
   onUpdateRoom,
   onJoinRoom,
@@ -104,7 +107,44 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
   const [showImagePicker, setShowImagePicker] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [isAnonymousMode, setIsAnonymousMode] = useState(false);
-  const [votedOptionIds, setVotedOptionIds] = useState<Record<string, string>>({});
+  
+  // Persist and load user's voted option IDs across page refreshes
+  const [votedOptionIds, setVotedOptionIds] = useState<Record<string, string>>(() => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const saved = localStorage.getItem(`CAMPUS_POLL_VOTES_${currentUser.username}`);
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+
+  // Keep votedOptionIds synchronized with incoming messages & user profile
+  useEffect(() => {
+    if (!currentUser.username || !messages || messages.length === 0) return;
+    setVotedOptionIds((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      messages.forEach((m) => {
+        if (m.poll && Array.isArray(m.poll.options)) {
+          const userVotedOpt = m.poll.options.find((opt) =>
+            Array.isArray(opt.voters) && opt.voters.includes(currentUser.username)
+          );
+          if (userVotedOpt && next[m.id] !== userVotedOpt.id) {
+            next[m.id] = userVotedOpt.id;
+            changed = true;
+          }
+        }
+      });
+      if (changed) {
+        try {
+          localStorage.setItem(`CAMPUS_POLL_VOTES_${currentUser.username}`, JSON.stringify(next));
+        } catch (e) {}
+        return next;
+      }
+      return prev;
+    });
+  }, [messages, currentUser.username]);
   
   // Mentions & Members modal state
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -119,6 +159,9 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
   const [showLeaveConfirmModal, setShowLeaveConfirmModal] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [activeMessageMenuId, setActiveMessageMenuId] = useState<string | null>(null);
+  const [activeReactionMenuId, setActiveReactionMenuId] = useState<string | null>(null);
+  const [activeMemberMenuUser, setActiveMemberMenuUser] = useState<string | null>(null);
+  const [kickingTargetUser, setKickingTargetUser] = useState<string | null>(null);
 
   // Private room unlock state
   const [privateCodeInput, setPrivateCodeInput] = useState('');
@@ -143,23 +186,33 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
     canDeleteMessages: true,
     canPinMessages: true,
     canManagePolls: true,
+    canDeletePolls: true,
     canChangePrivacy: true,
     canEditRoom: true,
+    canKickUsers: true,
   });
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const expiry = getRoomExpirationText(room.lastActivityAt);
 
-  // Identity checks
+  // Identity checks - strictly authenticate creator and super admin privileges
+  const isDevUser = Boolean(
+    currentUser.isAdmin ||
+    currentUser.username === 'muhammedrafii2002' ||
+    currentUser.username === 'muhammedrafi042002' ||
+    currentUser.email === 'muhammedrafi042002@gmail.com'
+  );
+
   const isCreator = Boolean(
-    (room.creatorUsername && currentUser.username === room.creatorUsername) ||
-    (!room.creatorUsername && room.roomType === 'student_created' && currentUser.displayName === room.creatorName)
+    isDevUser ||
+    currentUser.isAdmin ||
+    (room.creatorUsername && currentUser.username && currentUser.username.toLowerCase() === room.creatorUsername.toLowerCase())
   );
 
   const isUserJoined =
     isCreator ||
-    (Array.isArray(room.activeMembers) && room.activeMembers.includes(currentUser.username)) ||
-    (Array.isArray(room.allowedUsers) && room.allowedUsers.includes(currentUser.username));
+    (Array.isArray(room.activeMembers) && room.activeMembers.some((u) => u.toLowerCase() === currentUser.username?.toLowerCase())) ||
+    (Array.isArray(room.allowedUsers) && room.allowedUsers.some((u) => u.toLowerCase() === currentUser.username?.toLowerCase()));
 
   const hasFullAccess =
     !room.isPrivate ||
@@ -168,20 +221,35 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
     isUserJoined ||
     isLocallyUnlocked;
 
-  const isPromotedAdmin = Boolean(room.roomAdmins?.includes(currentUser.username));
-  const isRoomAdmin = currentUser.isAdmin || isCreator || isPromotedAdmin;
+  const isPromotedAdmin = Boolean(
+    currentUser.username &&
+    room.roomAdmins?.some((u) => u.toLowerCase() === currentUser.username.toLowerCase())
+  );
+  const isRoomAdmin = isCreator || isPromotedAdmin;
 
-  const userAdminRights = room.roomAdminRights?.[currentUser.username] || {
+  const userAdminRights: RoomAdminRights = room.roomAdminRights?.[currentUser.username] || {
     canDeleteMessages: true,
     canPinMessages: true,
     canManagePolls: true,
+    canDeletePolls: true,
     canChangePrivacy: true,
     canEditRoom: true,
+    canKickUsers: true,
   };
 
-  const canUserDeleteMessages = isCreator || currentUser.isAdmin || (isPromotedAdmin && userAdminRights.canDeleteMessages);
-  const canUserPinMessages = isCreator || currentUser.isAdmin || (isPromotedAdmin && userAdminRights.canPinMessages);
-  const canUserEditRoom = isCreator || currentUser.isAdmin || (isPromotedAdmin && (userAdminRights.canEditRoom ?? true));
+  // Telegram-style granular permission rules:
+  // 1. Only Room Creator / Owner / Global Dev Admin can promote, demote, or configure admin rights
+  const canUserManageAdmins = isCreator;
+
+  // 2. Room Creator OR Promoted Admin with canKickUsers can kick normal members
+  const canUserKickMembers = isCreator || (isPromotedAdmin && Boolean(userAdminRights.canKickUsers));
+
+  const canUserDeleteMessages = isCreator || (isPromotedAdmin && Boolean(userAdminRights.canDeleteMessages));
+  const canUserDeletePolls = isCreator || (isPromotedAdmin && Boolean(userAdminRights.canDeletePolls ?? userAdminRights.canManagePolls));
+  const canUserManagePolls = isCreator || (isPromotedAdmin && Boolean(userAdminRights.canManagePolls));
+  const canUserPinMessages = isCreator || (isPromotedAdmin && Boolean(userAdminRights.canPinMessages));
+  const canUserEditRoom = isCreator || (isPromotedAdmin && Boolean(userAdminRights.canEditRoom ?? true));
+  const canUserChangePrivacy = isCreator || (isPromotedAdmin && Boolean(userAdminRights.canChangePrivacy ?? true));
 
   // Active member list - ensure owner is always included and prioritized at the top
   const activeMembersList = useMemo(() => {
@@ -323,7 +391,15 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
   };
 
   const handleVote = (messageId: string, optionId: string) => {
-    setVotedOptionIds((prev) => ({ ...prev, [messageId]: optionId }));
+    setVotedOptionIds((prev) => {
+      const next = { ...prev, [messageId]: optionId };
+      if (currentUser.username) {
+        try {
+          localStorage.setItem(`CAMPUS_POLL_VOTES_${currentUser.username}`, JSON.stringify(next));
+        } catch (e) {}
+      }
+      return next;
+    });
     onVotePoll(messageId, optionId);
   };
 
@@ -902,7 +978,8 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                                 activeMessageMenuId === msg.id ? null : msg.id
                               )
                             }
-                            className="opacity-0 group-hover:opacity-100 transition p-1 hover:bg-black/20 rounded text-slate-400 hover:text-white cursor-pointer"
+                            className="opacity-70 sm:opacity-0 group-hover:opacity-100 transition p-1 hover:bg-slate-800/80 rounded-lg text-slate-400 hover:text-white cursor-pointer"
+                            title="Message options"
                           >
                             <MoreVertical className="w-3.5 h-3.5" />
                           </button>
@@ -913,7 +990,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                                 className="fixed inset-0 z-40"
                                 onClick={() => setActiveMessageMenuId(null)}
                               />
-                              <div className="absolute right-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-xl py-1 z-50 text-xs w-40">
+                              <div className="absolute right-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-xl py-1 z-50 text-xs w-44">
                                 {!msg.isAnonymous && msg.senderUsername && (
                                   <button
                                     type="button"
@@ -941,18 +1018,27 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                                 )}
 
                                 {/* Admin Promotion & Management from Message Menu */}
-                                {!isMe && !msg.isAnonymous && msg.senderUsername && (isCreator || currentUser.isAdmin) && (
+                                {!isMe && !msg.isAnonymous && msg.senderUsername && msg.senderUsername !== room.creatorUsername && canUserManageAdmins && (
                                   !(room.roomAdmins || []).includes(msg.senderUsername) ? (
                                     <button
                                       type="button"
                                       onClick={() => {
                                         setActiveMessageMenuId(null);
-                                        onPromoteRoomAdmin?.(room.id, msg.senderUsername!);
+                                        setConfiguringRightsUser(msg.senderUsername!);
+                                        setEditingRights({
+                                          canDeleteMessages: true,
+                                          canPinMessages: true,
+                                          canManagePolls: true,
+                                          canDeletePolls: true,
+                                          canChangePrivacy: true,
+                                          canEditRoom: true,
+                                          canKickUsers: true,
+                                        });
                                       }}
-                                      className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-purple-300 flex items-center gap-1.5 cursor-pointer"
+                                      className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-purple-300 flex items-center gap-1.5 cursor-pointer font-semibold"
                                     >
                                       <Crown className="w-3.5 h-3.5 text-purple-400" />
-                                      <span>Promote to Admin</span>
+                                      <span>👑 Promote to Admin</span>
                                     </button>
                                   ) : (
                                     <>
@@ -966,15 +1052,17 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                                               canDeleteMessages: true,
                                               canPinMessages: true,
                                               canManagePolls: true,
+                                              canDeletePolls: true,
                                               canChangePrivacy: true,
                                               canEditRoom: true,
+                                              canKickUsers: true,
                                             }
                                           );
                                         }}
-                                        className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-amber-300 flex items-center gap-1.5 cursor-pointer"
+                                        className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-amber-300 flex items-center gap-1.5 cursor-pointer font-semibold"
                                       >
                                         <Shield className="w-3.5 h-3.5 text-amber-400" />
-                                        <span>Admin Rights</span>
+                                        <span>⚙️ Edit Admin Rights</span>
                                       </button>
                                       <button
                                         type="button"
@@ -982,13 +1070,42 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                                           setActiveMessageMenuId(null);
                                           onDemoteRoomAdmin?.(room.id, msg.senderUsername!);
                                         }}
-                                        className="w-full px-3 py-1.5 text-left hover:bg-red-950/60 text-red-400 flex items-center gap-1.5 cursor-pointer"
+                                        className="w-full px-3 py-1.5 text-left hover:bg-red-950/60 text-red-400 flex items-center gap-1.5 cursor-pointer font-semibold"
                                       >
                                         <Trash2 className="w-3.5 h-3.5" />
-                                        <span>Demote from Admin</span>
+                                        <span>🔻 Demote to User</span>
                                       </button>
                                     </>
                                   )
+                                )}
+
+                                {/* Kick User from Room option */}
+                                {!isMe && !msg.isAnonymous && msg.senderUsername && msg.senderUsername !== room.creatorUsername && canUserKickMembers && (!room.roomAdmins?.includes(msg.senderUsername) || canUserManageAdmins) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveMessageMenuId(null);
+                                      setKickingTargetUser(msg.senderUsername!);
+                                    }}
+                                    className="w-full px-3 py-1.5 text-left hover:bg-red-950/60 text-rose-400 flex items-center gap-1.5 cursor-pointer font-semibold"
+                                  >
+                                    <span>🥾 Kick from Room</span>
+                                  </button>
+                                )}
+
+                                {/* Delete Poll Option */}
+                                {msg.poll && (isMe || msg.poll.createdBy === currentUser.username || canUserDeletePolls) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveMessageMenuId(null);
+                                      onDeletePoll(msg.id);
+                                    }}
+                                    className="w-full px-3 py-1.5 text-left hover:bg-red-950/60 text-purple-300 hover:text-red-300 flex items-center gap-1.5 cursor-pointer font-semibold"
+                                  >
+                                    <BarChart2 className="w-3.5 h-3.5 text-purple-400" />
+                                    <span>🗑️ Delete Poll</span>
+                                  </button>
                                 )}
 
                                 {canUserPinMessages && (
@@ -1114,15 +1231,17 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                   </div>
                 )}
 
-                {/* Reaction Chips */}
-                <div className="mt-2.5 flex items-center gap-1 flex-wrap">
+                {/* Reaction Chips & Quick React Menu */}
+                <div className="mt-2.5 flex items-center gap-1 flex-wrap relative">
                   {Object.entries(msg.reactions || {}).map(([emoji, count]) => {
                     const num = Number(count) || 0;
                     return num > 0 ? (
                       <button
                         key={emoji}
+                        type="button"
                         onClick={() => onAddReactionToMessage(msg.id, emoji)}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-900/80 hover:bg-slate-700 border border-slate-700 text-xs text-slate-300 transition active:scale-90 cursor-pointer"
+                        title={`React with ${emoji}`}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-900/90 hover:bg-slate-700 border border-slate-700/80 text-xs text-slate-300 transition active:scale-90 cursor-pointer shadow-sm"
                       >
                         <span>{emoji}</span>
                         <span className="font-semibold text-[10px] text-slate-400">{num}</span>
@@ -1130,12 +1249,49 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                     ) : null;
                   })}
 
-                  <button
-                    onClick={() => onAddReactionToMessage(msg.id, '🔥')}
-                    className="opacity-0 group-hover:opacity-100 transition px-2 py-0.5 rounded-lg bg-slate-900/80 text-[11px] text-slate-400 hover:text-white cursor-pointer"
-                  >
-                    +🔥
-                  </button>
+                  {/* Add reaction trigger */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!currentUser.isRegistered) {
+                          onAddReactionToMessage(msg.id, '🔥');
+                          return;
+                        }
+                        setActiveReactionMenuId(activeReactionMenuId === msg.id ? null : msg.id);
+                      }}
+                      title="Add reaction"
+                      className="px-1.5 py-0.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-[11px] text-slate-400 hover:text-amber-400 transition cursor-pointer flex items-center gap-1"
+                    >
+                      <Smile className="w-3 h-3" />
+                      <span>+</span>
+                    </button>
+
+                    {activeReactionMenuId === msg.id && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-40"
+                          onClick={() => setActiveReactionMenuId(null)}
+                        />
+                        <div className="absolute left-0 bottom-full mb-1 z-50 bg-slate-900/95 backdrop-blur border border-slate-700 rounded-full px-2 py-1 flex items-center gap-1 shadow-2xl animate-in fade-in zoom-in-95">
+                          {['🔥', '❤️', '👍', '😂', '👏', '🚀', '💯', '💡'].map((em) => (
+                            <button
+                              key={em}
+                              type="button"
+                              onClick={() => {
+                                onAddReactionToMessage(msg.id, em);
+                                setActiveReactionMenuId(null);
+                              }}
+                              className="text-base p-1 hover:scale-125 transition active:scale-95 cursor-pointer"
+                              title={`React with ${em}`}
+                            >
+                              {em}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1374,26 +1530,26 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
       {/* Private Room Passcode Unlock Modal */}
       {showPrivateUnlockModal && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150"
           onClick={(e) => {
             if (e.target === e.currentTarget) setShowPrivateUnlockModal(false);
           }}
         >
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 space-y-4 text-slate-100 shadow-2xl animate-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-3xl max-w-sm w-full max-h-[85vh] sm:max-h-[90vh] flex flex-col p-4 sm:p-5 space-y-3 sm:space-y-4 text-slate-100 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 shrink-0">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-2xl bg-purple-500/10 border border-purple-500/30 text-purple-400 flex items-center justify-center font-bold">
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl sm:rounded-2xl bg-purple-500/10 border border-purple-500/30 text-purple-400 flex items-center justify-center font-bold">
                   <Lock className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-sm text-white">Private Room Code</h3>
-                  <p className="text-[11px] text-slate-400">Invite Code Required to Join</p>
+                  <h3 className="font-extrabold text-xs sm:text-sm text-white">Private Room Code</h3>
+                  <p className="text-[10px] sm:text-[11px] text-slate-400">Invite Code Required to Join</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setShowPrivateUnlockModal(false)}
-                className="p-1 rounded-xl bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1404,14 +1560,14 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                 e.preventDefault();
                 handleUnlockPrivateRoom(e, modalPasscodeInput);
               }}
-              className="space-y-3.5"
+              className="space-y-3 overflow-y-auto pr-1 flex-1 py-1"
             >
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                <label className="block text-xs font-bold text-slate-300 mb-1">
                   Enter 6-Character Passcode
                 </label>
                 <div className="relative">
-                  <Key className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <Key className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     required
@@ -1421,32 +1577,32 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                       setModalPasscodeInput(e.target.value);
                     }}
                     placeholder="e.g. PRV-8A2F91"
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-800 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500 text-xs font-mono font-bold text-white placeholder-slate-500 uppercase"
+                    className="w-full pl-9 pr-3 py-2 sm:py-2.5 rounded-xl bg-slate-800 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500 text-xs font-mono font-bold text-white placeholder-slate-500 uppercase"
                     autoFocus
                   />
                 </div>
-                <p className="text-[11px] text-slate-400 mt-1.5">
+                <p className="text-[10px] sm:text-[11px] text-slate-400 mt-1.5">
                   This room is private. You must enter the exact host invite code to read messages and join.
                 </p>
               </div>
 
               {modalPasscodeError && (
-                <div className="p-3 bg-red-950/40 border border-red-500/30 text-red-300 rounded-xl text-xs font-semibold">
+                <div className="p-2.5 bg-red-950/40 border border-red-500/30 text-red-300 rounded-xl text-xs font-semibold">
                   {modalPasscodeError}
                 </div>
               )}
 
-              <div className="flex gap-2 pt-2">
+              <div className="flex gap-2 pt-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowPrivateUnlockModal(false)}
-                  className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 transition cursor-pointer"
+                  className="flex-1 py-2 sm:py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs shadow-md transition cursor-pointer active:scale-95 flex items-center justify-center gap-1.5"
+                  className="flex-1 py-2 sm:py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs shadow-md transition cursor-pointer active:scale-95 flex items-center justify-center gap-1.5"
                 >
                   <Lock className="w-3.5 h-3.5" />
                   <span>Unlock & Join</span>
@@ -1460,20 +1616,21 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
       {/* Edit Room Details Modal */}
       {showEditRoomModal && (
         <div
-          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150"
           onClick={(e) => {
             if (e.target === e.currentTarget) setShowEditRoomModal(false);
           }}
         >
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 text-slate-100 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-3xl max-w-md w-full max-h-[85vh] sm:max-h-[90vh] flex flex-col p-4 sm:p-5 shadow-2xl space-y-3 sm:space-y-4 text-slate-100 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 shrink-0">
               <div className="flex items-center gap-2">
                 <Settings className="w-5 h-5 text-amber-400" />
-                <h3 className="font-extrabold text-base text-white">Edit Room Details</h3>
+                <h3 className="font-extrabold text-sm sm:text-base text-white">Edit Room Details</h3>
               </div>
               <button
+                type="button"
                 onClick={() => setShowEditRoomModal(false)}
-                className="p-1 rounded-xl bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1503,7 +1660,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                 }
                 setShowEditRoomModal(false);
               }}
-              className="space-y-4"
+              className="space-y-3 sm:space-y-4 overflow-y-auto pr-1 flex-1 py-1"
             >
               {/* Emoji & Title */}
               <div className="grid grid-cols-4 gap-2">
@@ -1513,7 +1670,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                     type="text"
                     value={editEmoji}
                     onChange={(e) => setEditEmoji(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-center text-lg focus:outline-none focus:border-amber-500"
+                    className="w-full px-2.5 py-1.5 sm:py-2 bg-slate-950 border border-slate-800 rounded-xl text-center text-base sm:text-lg focus:outline-none focus:border-amber-500"
                   />
                 </div>
                 <div className="col-span-3">
@@ -1523,13 +1680,13 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                     required
                     value={editTitle}
                     onChange={(e) => setEditTitle(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500"
+                    className="w-full px-3 py-1.5 sm:py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500"
                   />
                 </div>
               </div>
 
               {/* Public vs Private Room Switch */}
-              <div className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
+              <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
                 <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
                   Privacy Setting
                 </label>
@@ -1537,32 +1694,32 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                   <button
                     type="button"
                     onClick={() => setEditIsPrivate(false)}
-                    className={`p-2.5 rounded-xl border text-left transition flex items-center gap-2 cursor-pointer ${
+                    className={`p-2 sm:p-2.5 rounded-xl border text-left transition flex items-center gap-2 cursor-pointer ${
                       !editIsPrivate
                         ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200 font-bold'
                         : 'bg-slate-900 border-slate-800 text-slate-400'
                     }`}
                   >
-                    <Globe className="w-4 h-4 text-emerald-400" />
-                    <div>
-                      <div className="text-xs font-bold text-white">Public</div>
-                      <div className="text-[9px] opacity-75">All campus students</div>
+                    <Globe className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-white truncate">Public</div>
+                      <div className="text-[9px] opacity-75 truncate">All campus</div>
                     </div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setEditIsPrivate(true)}
-                    className={`p-2.5 rounded-xl border text-left transition flex items-center gap-2 cursor-pointer ${
+                    className={`p-2 sm:p-2.5 rounded-xl border text-left transition flex items-center gap-2 cursor-pointer ${
                       editIsPrivate
                         ? 'bg-purple-950/80 border-purple-500 text-purple-200 font-bold'
                         : 'bg-slate-900 border-slate-800 text-slate-400'
                     }`}
                   >
-                    <Lock className="w-4 h-4 text-purple-400" />
-                    <div>
-                      <div className="text-xs font-bold text-white">Private</div>
-                      <div className="text-[9px] opacity-75">Code/link only</div>
+                    <Lock className="w-4 h-4 text-purple-400 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-white truncate">Private</div>
+                      <div className="text-[9px] opacity-75 truncate">Code only</div>
                     </div>
                   </button>
                 </div>
@@ -1574,7 +1731,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                 <select
                   value={editCategory}
                   onChange={(e) => setEditCategory(e.target.value as any)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-slate-200 focus:outline-none focus:border-amber-500"
+                  className="w-full px-3 py-1.5 sm:py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-slate-200 focus:outline-none focus:border-amber-500"
                 >
                   <option value="canteen">🍛 Canteen & Food</option>
                   <option value="fest">🎉 Fest & Cultural</option>
@@ -1594,7 +1751,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                   value={editDescription}
                   onChange={(e) => setEditDescription(e.target.value)}
                   rows={2}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:border-amber-500 resize-none"
+                  className="w-full px-3 py-1.5 sm:py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:border-amber-500 resize-none"
                 />
               </div>
 
@@ -1605,22 +1762,22 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                   type="text"
                   value={editLocationArea}
                   onChange={(e) => setEditLocationArea(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-slate-200 focus:outline-none focus:border-amber-500"
+                  className="w-full px-3 py-1.5 sm:py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-slate-200 focus:outline-none focus:border-amber-500"
                 />
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center gap-2 pt-2 border-t border-slate-800">
+              <div className="flex items-center gap-2 pt-2 border-t border-slate-800 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowEditRoomModal(false)}
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition cursor-pointer"
+                  className="flex-1 py-2 sm:py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-xl shadow-lg transition cursor-pointer"
+                  className="flex-1 py-2 sm:py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-xl shadow-lg transition cursor-pointer"
                 >
                   Save Changes
                 </button>
@@ -1632,112 +1789,115 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
 
       {/* Share Room Join Link Modal */}
       {showShareModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 text-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-slate-900 border border-slate-700 text-white rounded-2xl sm:rounded-3xl max-w-md w-full max-h-[85vh] sm:max-h-[90vh] flex flex-col p-4 sm:p-5 space-y-3 sm:space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 shrink-0">
               <div className="flex items-center gap-2">
-                <div className="w-10 h-10 rounded-2xl bg-orange-500/10 border border-orange-500/20 text-orange-400 flex items-center justify-center font-bold">
-                  <Share2 className="w-5 h-5" />
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl sm:rounded-2xl bg-orange-500/10 border border-orange-500/20 text-orange-400 flex items-center justify-center font-bold">
+                  <Share2 className="w-4 h-4 sm:w-5 sm:h-5" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-sm text-white">Share Room Join Link</h3>
-                  <p className="text-[11px] text-slate-400">Invite students to join live</p>
+                  <h3 className="font-extrabold text-xs sm:text-sm text-white">Share Room Join Link</h3>
+                  <p className="text-[10px] sm:text-[11px] text-slate-400">Invite students to join live</p>
                 </div>
               </div>
-              <button
-                onClick={() => {
-                  setShowShareModal(false);
-                  setCopiedLink(false);
-                }}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Room Type Notice */}
-            {room.isPrivate ? (
-              <div className="bg-purple-950/80 border border-purple-500/50 rounded-2xl p-3.5 space-y-2 text-purple-200">
-                <div className="flex items-center gap-2 font-bold text-xs text-purple-300">
-                  <Lock className="w-4 h-4 text-purple-400" />
-                  <span>🔒 Private Room</span>
-                </div>
-                <p className="text-[11px] leading-relaxed text-purple-200/90">
-                  This is a private room. Only students with this exact invite link or code can join.
-                </p>
-                {room.inviteCode && (
-                  <div className="flex items-center justify-between bg-purple-900/60 p-2 rounded-xl border border-purple-700">
-                    <span className="text-[10px] text-purple-300 font-medium">Invite Code:</span>
-                    <span className="text-xs font-mono font-black text-amber-300 tracking-wider">
-                      {room.inviteCode}
-                    </span>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="bg-emerald-950/80 border border-emerald-500/50 rounded-2xl p-3.5 space-y-1 text-emerald-200">
-                <div className="flex items-center gap-2 font-bold text-xs text-emerald-300">
-                  <span>🌐 Public Room</span>
-                </div>
-                <p className="text-[11px] leading-relaxed text-emerald-200/90">
-                  This room is public. Anyone on campus can view and participate.
-                </p>
-              </div>
-            )}
-
-            {/* Link Input & Copy */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-400 mb-1.5">
-                Direct Room Link
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  readOnly
-                  value={
-                    room.isPrivate && room.inviteCode
-                      ? `${window.location.origin}${window.location.pathname}?room=${room.id}&invite=${room.inviteCode}`
-                      : `${window.location.origin}${window.location.pathname}?room=${room.id}`
-                  }
-                  className="flex-1 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-300 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const link = room.isPrivate && room.inviteCode
-                      ? `${window.location.origin}${window.location.pathname}?room=${room.id}&invite=${room.inviteCode}`
-                      : `${window.location.origin}${window.location.pathname}?room=${room.id}`;
-                    if (navigator.clipboard) {
-                      navigator.clipboard.writeText(link);
-                      setCopiedLink(true);
-                      setTimeout(() => setCopiedLink(false), 2500);
-                    }
-                  }}
-                  className="px-4 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs flex items-center gap-1.5 transition shrink-0 active:scale-95 cursor-pointer"
-                >
-                  {copiedLink ? (
-                    <>
-                      <Check className="w-4 h-4 text-emerald-300" />
-                      <span>Copied!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Share2 className="w-4 h-4" />
-                      <span>Copy Link</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            <div className="pt-2 text-center">
               <button
                 type="button"
                 onClick={() => {
                   setShowShareModal(false);
                   setCopiedLink(false);
                 }}
-                className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold cursor-pointer"
+                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto pr-1 flex-1 space-y-3 py-1">
+              {/* Room Type Notice */}
+              {room.isPrivate ? (
+                <div className="bg-purple-950/80 border border-purple-500/50 rounded-2xl p-3 space-y-2 text-purple-200">
+                  <div className="flex items-center gap-2 font-bold text-xs text-purple-300">
+                    <Lock className="w-4 h-4 text-purple-400 shrink-0" />
+                    <span>🔒 Private Room</span>
+                  </div>
+                  <p className="text-[10px] sm:text-[11px] leading-relaxed text-purple-200/90">
+                    This is a private room. Only students with this exact invite link or code can join.
+                  </p>
+                  {room.inviteCode && (
+                    <div className="flex items-center justify-between bg-purple-900/60 p-2 rounded-xl border border-purple-700">
+                      <span className="text-[10px] text-purple-300 font-medium">Invite Code:</span>
+                      <span className="text-xs font-mono font-black text-amber-300 tracking-wider">
+                        {room.inviteCode}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-emerald-950/80 border border-emerald-500/50 rounded-2xl p-3 space-y-1 text-emerald-200">
+                  <div className="flex items-center gap-2 font-bold text-xs text-emerald-300">
+                    <span>🌐 Public Room</span>
+                  </div>
+                  <p className="text-[10px] sm:text-[11px] leading-relaxed text-emerald-200/90">
+                    This room is public. Anyone on campus can view and participate.
+                  </p>
+                </div>
+              )}
+
+              {/* Link Input & Copy */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-400 mb-1.5">
+                  Direct Room Link
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={
+                      room.isPrivate && room.inviteCode
+                        ? `${window.location.origin}${window.location.pathname}?room=${room.id}&invite=${room.inviteCode}`
+                        : `${window.location.origin}${window.location.pathname}?room=${room.id}`
+                    }
+                    className="flex-1 px-3 py-2 sm:py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-300 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const link = room.isPrivate && room.inviteCode
+                        ? `${window.location.origin}${window.location.pathname}?room=${room.id}&invite=${room.inviteCode}`
+                        : `${window.location.origin}${window.location.pathname}?room=${room.id}`;
+                      if (navigator.clipboard) {
+                        navigator.clipboard.writeText(link);
+                        setCopiedLink(true);
+                        setTimeout(() => setCopiedLink(false), 2500);
+                      }
+                    }}
+                    className="px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs flex items-center gap-1.5 transition shrink-0 active:scale-95 cursor-pointer"
+                  >
+                    {copiedLink ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-300" />
+                        <span>Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Share2 className="w-4 h-4" />
+                        <span>Copy Link</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 text-center shrink-0 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowShareModal(false);
+                  setCopiedLink(false);
+                }}
+                className="w-full py-2 sm:py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold cursor-pointer"
               >
                 Done
               </button>
@@ -1767,16 +1927,17 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
 
       {/* Room Members List Modal */}
       {showMembersModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 text-slate-100 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-3xl max-w-md w-full max-h-[85vh] sm:max-h-[90vh] flex flex-col p-4 sm:p-5 space-y-3 sm:space-y-4 text-slate-100 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 shrink-0">
               <div className="flex items-center gap-2">
-                <Users className="w-5 h-5 text-emerald-400" />
-                <h3 className="font-extrabold text-white text-base">
+                <Users className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400" />
+                <h3 className="font-extrabold text-white text-xs sm:text-base">
                   Room Members ({activeMembersList.length})
                 </h3>
               </div>
               <button
+                type="button"
                 onClick={() => setShowMembersModal(false)}
                 className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
               >
@@ -1784,42 +1945,57 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
               </button>
             </div>
 
-            <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
+            <div className="overflow-y-auto space-y-2 pr-1 flex-1 py-1">
               {activeMembersList.map((username) => {
+                const isMe = username === currentUser.username;
                 const isMemberCreator = room.creatorUsername === username;
-                const isMemberAdmin = room.roomAdmins?.includes(username);
-                const isDevMember = username === 'muhammedrafii2002';
+                const isMemberAdmin = Boolean(room.roomAdmins?.includes(username));
+                const isDevMember = username === 'muhammedrafii2002' || username === 'muhammedrafi042002';
 
                 return (
                   <div
                     key={username}
-                    className={`p-3 rounded-2xl flex items-center justify-between transition border ${
-                      isMemberCreator
+                    className={`p-2.5 sm:p-3 rounded-xl sm:rounded-2xl flex items-center justify-between transition border ${
+                      isMe
+                        ? 'bg-slate-900/90 border-orange-500/40 ring-1 ring-orange-500/20'
+                        : isMemberCreator
                         ? 'bg-amber-950/20 border-amber-500/40 hover:border-amber-400'
-                        : 'bg-slate-950 border-slate-800 hover:border-orange-500/50'
+                        : isMemberAdmin
+                        ? 'bg-purple-950/20 border-purple-500/40 hover:border-purple-400'
+                        : 'bg-slate-950 border-slate-800 hover:border-slate-700'
                     }`}
                   >
                     <div
                       onClick={() => {
+                        if (isMe) return;
                         if (onSelectUser) onSelectUser(username);
                         else onOpenPrivateChat?.(username);
                       }}
-                      className="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0"
+                      className={`flex items-center gap-2 sm:gap-2.5 flex-1 min-w-0 ${isMe ? 'cursor-default' : 'cursor-pointer'}`}
                     >
-                      <div className={`w-8 h-8 rounded-xl font-bold flex items-center justify-center text-xs border shrink-0 hover:scale-105 transition ${
-                        isDevMember
+                      <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl font-bold flex items-center justify-center text-xs border shrink-0 transition ${
+                        isMe
+                          ? 'bg-gradient-to-tr from-orange-600 to-amber-500 text-white border-orange-400/50'
+                          : isDevMember
                           ? 'bg-gradient-to-tr from-orange-600 to-amber-500 text-white border-orange-400/40'
                           : isMemberCreator
                           ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                          : isMemberAdmin
+                          ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
                           : 'bg-orange-500/20 text-orange-400 border-orange-500/30'
                       }`}>
                         {isDevMember ? '👨‍💻' : username.slice(0, 2).toUpperCase()}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="font-bold text-xs text-white flex items-center gap-1.5 flex-wrap">
-                          <span className="hover:text-orange-400 transition truncate">
+                          <span className={`truncate ${isMe ? 'text-orange-300' : 'hover:text-orange-400 transition'}`}>
                             {isDevMember ? 'Developer' : `@${username}`}
                           </span>
+                          {isMe && (
+                            <span className="px-1.5 py-0.5 bg-orange-500/20 text-orange-300 border border-orange-500/40 rounded text-[9px] font-black shrink-0">
+                              You
+                            </span>
+                          )}
                           {isDevMember && (
                             <span className="px-1.5 py-0.5 bg-gradient-to-r from-orange-500/20 to-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-[9px] font-black flex items-center gap-1 shrink-0 shadow-sm">
                               ⚡ Lead Dev
@@ -1827,11 +2003,11 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                           )}
                           {isMemberCreator && (
                             <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-[9px] font-black flex items-center gap-1 shrink-0 shadow-sm">
-                              <Crown className="w-3 h-3 text-amber-400" /> Room Owner
+                              <Crown className="w-3 h-3 text-amber-400" /> Owner
                             </span>
                           )}
                           {!isMemberCreator && isMemberAdmin && (
-                            <span className="px-1.5 py-0.5 bg-purple-500/20 text-purple-300 border border-purple-500/40 rounded text-[9px] font-black flex items-center gap-1 shrink-0">
+                            <span className="px-1.5 py-0.5 bg-purple-500/20 text-purple-300 border border-purple-500/40 rounded text-[9px] font-black flex items-center gap-1 shrink-0 shadow-sm">
                               <Shield className="w-3 h-3 text-purple-400" /> Admin
                             </span>
                           )}
@@ -1843,79 +2019,20 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0 ml-2 flex-wrap justify-end">
-                      {/* Admin Management Buttons (For Room Owner / Platform Dev) */}
-                      {!isMemberCreator && (isCreator || currentUser.isAdmin) && username !== currentUser.username && (
-                        !isMemberAdmin ? (
-                          <button
-                            type="button"
-                            onClick={() => onPromoteRoomAdmin?.(room.id, username)}
-                            className="px-2.5 py-1.5 bg-purple-600/20 hover:bg-purple-600/40 text-purple-300 border border-purple-500/40 font-bold text-xs rounded-xl transition flex items-center gap-1 cursor-pointer active:scale-95"
-                            title="Promote to Room Admin"
-                          >
-                            <Crown className="w-3 h-3 text-purple-400" />
-                            <span>Make Admin</span>
-                          </button>
-                        ) : (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setConfiguringRightsUser(username);
-                                setEditingRights(
-                                  room.roomAdminRights?.[username] || {
-                                    canDeleteMessages: true,
-                                    canPinMessages: true,
-                                    canManagePolls: true,
-                                    canChangePrivacy: true,
-                                    canEditRoom: true,
-                                  }
-                                );
-                              }}
-                              className="px-2 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold text-xs rounded-xl transition flex items-center gap-1 cursor-pointer active:scale-95"
-                              title="Configure Admin Permissions"
-                            >
-                              <Shield className="w-3 h-3 text-amber-400" />
-                              <span>Rights</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => onDemoteRoomAdmin?.(room.id, username)}
-                              className="px-2 py-1.5 bg-red-950/60 hover:bg-red-900/80 text-red-300 border border-red-800/60 font-bold text-xs rounded-xl transition flex items-center gap-1 cursor-pointer active:scale-95"
-                              title="Remove Admin Permissions"
-                            >
-                              <Trash2 className="w-3 h-3 text-red-400" />
-                              <span>Demote</span>
-                            </button>
-                          </>
-                        )
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (onSelectUser) onSelectUser(username);
-                          else onOpenPrivateChat?.(username);
-                        }}
-                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold text-xs rounded-xl border border-slate-700 transition cursor-pointer"
-                      >
-                        Profile
-                      </button>
-
-                      {username !== currentUser.username ? (
-                        <button
-                          onClick={() => {
-                            setShowMembersModal(false);
-                            onOpenPrivateChat?.(username);
-                          }}
-                          className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs rounded-xl transition cursor-pointer"
-                        >
-                          Chat
-                        </button>
-                      ) : (
-                        <span className="text-[10px] font-bold text-slate-500 px-2 py-1 rounded bg-slate-800">
-                          You
+                    <div className="flex items-center gap-1.5 shrink-0 ml-1.5">
+                      {isMe ? (
+                        <span className="text-[10px] font-extrabold text-orange-400 px-2.5 py-1 rounded-xl bg-orange-500/10 border border-orange-500/30">
+                          👤 You
                         </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setActiveMemberMenuUser(username)}
+                          className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center border border-slate-700/80 transition cursor-pointer active:scale-95 shadow-sm"
+                          title="Member options"
+                        >
+                          <MoreVertical className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                        </button>
                       )}
                     </div>
                   </div>
@@ -1926,23 +2043,219 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
         </div>
       )}
 
+      {/* Member Action Options Popup Modal */}
+      {activeMemberMenuUser && (
+        <div
+          className="fixed inset-0 z-[65] bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setActiveMemberMenuUser(null);
+          }}
+        >
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl sm:rounded-3xl max-w-sm w-full max-h-[85vh] sm:max-h-[90vh] flex flex-col p-4 sm:p-5 space-y-3 sm:space-y-4 text-slate-100 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-orange-500/20 text-orange-400 border border-orange-500/30 flex items-center justify-center font-bold text-xs shrink-0">
+                  {activeMemberMenuUser.slice(0, 2).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <h3 className="font-extrabold text-white text-xs sm:text-sm flex items-center gap-1.5 truncate">
+                    <span>@{activeMemberMenuUser}</span>
+                    {room.roomAdmins?.includes(activeMemberMenuUser) && (
+                      <span className="px-1.5 py-0.5 bg-purple-500/20 text-purple-300 border border-purple-500/40 rounded text-[9px] font-bold shrink-0">
+                        Admin
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-[10px] text-slate-400">Select an action for this member</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveMemberMenuUser(null)}
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2 overflow-y-auto pr-1 flex-1 py-1">
+              {/* Telegram-style Admin Actions: Only Room Creator / SuperAdmin can promote or manage admin roles */}
+              {canUserManageAdmins && activeMemberMenuUser !== room.creatorUsername && (
+                <>
+                  {!room.roomAdmins?.includes(activeMemberMenuUser) ? (
+                    /* Regular Member -> Promote to Admin */
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const target = activeMemberMenuUser;
+                        setActiveMemberMenuUser(null);
+                        setConfiguringRightsUser(target);
+                        setEditingRights({
+                          canDeleteMessages: true,
+                          canPinMessages: true,
+                          canManagePolls: true,
+                          canDeletePolls: true,
+                          canChangePrivacy: true,
+                          canEditRoom: true,
+                          canKickUsers: true,
+                        });
+                      }}
+                      className="w-full p-2.5 sm:p-3 bg-purple-950/40 hover:bg-purple-900/60 border border-purple-500/40 rounded-xl sm:rounded-2xl text-left flex items-center gap-2.5 sm:gap-3 transition cursor-pointer active:scale-98 group"
+                    >
+                      <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold text-sm shrink-0">
+                        <Crown className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-purple-200 group-hover:text-white">Promote to Admin</div>
+                        <div className="text-[10px] text-purple-400/80">Configure moderation rights & permissions</div>
+                      </div>
+                    </button>
+                  ) : (
+                    /* Existing Admin -> Edit Rights & Demote */
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const target = activeMemberMenuUser;
+                          setActiveMemberMenuUser(null);
+                          setConfiguringRightsUser(target);
+                          setEditingRights(
+                            room.roomAdminRights?.[target] || {
+                              canDeleteMessages: true,
+                              canPinMessages: true,
+                              canManagePolls: true,
+                              canDeletePolls: true,
+                              canChangePrivacy: true,
+                              canEditRoom: true,
+                              canKickUsers: true,
+                            }
+                          );
+                        }}
+                        className="w-full p-2.5 sm:p-3 bg-amber-950/40 hover:bg-amber-900/60 border border-amber-500/40 rounded-xl sm:rounded-2xl text-left flex items-center gap-2.5 sm:gap-3 transition cursor-pointer active:scale-98 group"
+                      >
+                        <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-sm shrink-0">
+                          <Shield className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-amber-200 group-hover:text-white">Edit Admin Rights</div>
+                          <div className="text-[10px] text-amber-400/80">Enable or disable specific admin privileges</div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const target = activeMemberMenuUser;
+                          setActiveMemberMenuUser(null);
+                          onDemoteRoomAdmin?.(room.id, target);
+                        }}
+                        className="w-full p-2.5 sm:p-3 bg-red-950/30 hover:bg-red-950/60 border border-red-800/40 rounded-xl sm:rounded-2xl text-left flex items-center gap-2.5 sm:gap-3 transition cursor-pointer active:scale-98 group"
+                      >
+                        <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-red-500/20 text-red-400 flex items-center justify-center font-bold text-sm shrink-0">
+                          <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-red-200 group-hover:text-white">Demote to Member</div>
+                          <div className="text-[10px] text-red-400/80">Revoke admin privileges for this user</div>
+                        </div>
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+
+              {/* Kick Out: Only Creator / SuperAdmin OR Promoted Admin with canKickUsers right (and cannot kick Creator or fellow Admins) */}
+              {canUserKickMembers && activeMemberMenuUser !== room.creatorUsername && (!room.roomAdmins?.includes(activeMemberMenuUser) || canUserManageAdmins) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = activeMemberMenuUser;
+                    setActiveMemberMenuUser(null);
+                    setKickingTargetUser(target);
+                  }}
+                  className="w-full p-2.5 sm:p-3 bg-rose-950/30 hover:bg-rose-950/60 border border-rose-800/40 rounded-xl sm:rounded-2xl text-left flex items-center gap-2.5 sm:gap-3 transition cursor-pointer active:scale-98 group"
+                >
+                  <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-sm shrink-0">
+                    <UserX className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-rose-200 group-hover:text-white">Kick Out</div>
+                    <div className="text-[10px] text-rose-400/80">Remove this member from the room</div>
+                  </div>
+                </button>
+              )}
+
+              {/* Direct Message & Profile for all users */}
+              <button
+                type="button"
+                onClick={() => {
+                  const target = activeMemberMenuUser;
+                  setActiveMemberMenuUser(null);
+                  setShowMembersModal(false);
+                  onOpenPrivateChat?.(target);
+                }}
+                className="w-full p-2.5 sm:p-3 bg-slate-800/80 hover:bg-slate-800 border border-slate-700 rounded-xl sm:rounded-2xl text-left flex items-center gap-2.5 sm:gap-3 transition cursor-pointer active:scale-98"
+              >
+                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center font-bold text-sm shrink-0">
+                  <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-white">Send Direct Message</div>
+                  <div className="text-[10px] text-slate-400">Open a 1-on-1 private chat</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const target = activeMemberMenuUser;
+                  setActiveMemberMenuUser(null);
+                  if (onSelectUser) onSelectUser(target);
+                  else onOpenPrivateChat?.(target);
+                }}
+                className="w-full p-2.5 sm:p-3 bg-slate-800/50 hover:bg-slate-800 border border-slate-700/60 rounded-xl sm:rounded-2xl text-left flex items-center gap-2.5 sm:gap-3 transition cursor-pointer active:scale-98"
+              >
+                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-slate-700 text-slate-300 flex items-center justify-center font-bold text-sm shrink-0">
+                  👤
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-slate-300">View User Profile</div>
+                  <div className="text-[10px] text-slate-400">Check college affiliation and badges</div>
+                </div>
+              </button>
+            </div>
+
+            <div className="pt-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setActiveMemberMenuUser(null)}
+                className="w-full py-2 sm:py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Room Activity Log Modal */}
       {showRoomLogsModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-4 text-slate-100 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-3xl max-w-lg w-full max-h-[85vh] sm:max-h-[90vh] flex flex-col p-4 sm:p-5 space-y-3 sm:space-y-4 text-slate-100 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 shrink-0">
               <div className="flex items-center gap-2">
                 <Clock className="w-5 h-5 text-blue-400" />
                 <div>
-                  <h3 className="font-extrabold text-white text-base">
+                  <h3 className="font-extrabold text-white text-sm sm:text-base">
                     📜 Room Activity Logs
                   </h3>
-                  <p className="text-[11px] text-slate-400">
+                  <p className="text-[10px] sm:text-[11px] text-slate-400">
                     Real-time member join & leave records
                   </p>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setShowRoomLogsModal(false)}
                 className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
               >
@@ -1950,9 +2263,9 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
               </button>
             </div>
 
-            <div className="max-h-80 overflow-y-auto space-y-2 pr-1">
+            <div className="overflow-y-auto space-y-2 pr-1 flex-1 py-1">
               {roomLogs.length === 0 ? (
-                <div className="p-8 text-center bg-slate-950 rounded-2xl border border-slate-800">
+                <div className="p-6 sm:p-8 text-center bg-slate-950 rounded-2xl border border-slate-800">
                   <p className="text-xs text-slate-400">No activity logged yet.</p>
                 </div>
               ) : (
@@ -1972,11 +2285,11 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                   return (
                     <div
                       key={log.id}
-                      className="p-3 bg-slate-950 border border-slate-800/80 rounded-2xl flex items-center justify-between gap-3 text-xs"
+                      className="p-2.5 sm:p-3 bg-slate-950 border border-slate-800/80 rounded-xl sm:rounded-2xl flex items-center justify-between gap-3 text-xs"
                     >
-                      <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
                         <div
-                          className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold shrink-0 ${
+                          className={`w-6 h-6 sm:w-7 sm:h-7 rounded-xl flex items-center justify-center text-xs font-bold shrink-0 ${
                             isJoin
                               ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                               : isLeave
@@ -2013,7 +2326,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
               )}
             </div>
 
-            <div className="pt-2 border-t border-slate-800 flex justify-end">
+            <div className="pt-2 border-t border-slate-800 flex justify-end shrink-0">
               <button
                 type="button"
                 onClick={() => setShowRoomLogsModal(false)}
@@ -2028,27 +2341,29 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
 
       {/* Deletion Modal */}
       {showDeletionModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 text-slate-100 shadow-2xl">
-            <div className="flex items-center gap-2 text-red-400">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-3xl max-w-md w-full max-h-[85vh] sm:max-h-[90vh] flex flex-col p-4 sm:p-5 space-y-3 sm:space-y-4 text-slate-100 shadow-2xl">
+            <div className="flex items-center gap-2 text-red-400 border-b border-slate-800 pb-2.5 shrink-0">
               <AlertTriangle className="w-5 h-5" />
-              <h3 className="font-extrabold text-base text-white">Request Room Deletion</h3>
+              <h3 className="font-extrabold text-sm sm:text-base text-white">Request Room Deletion</h3>
             </div>
-            <p className="text-xs text-slate-400">
-              As Room Admin, explain why this campus room should be archived or removed:
-            </p>
-            <textarea
-              value={deletionReasonInput}
-              onChange={(e) => setDeletionReasonInput(e.target.value)}
-              placeholder="e.g., Event has finished or topic completed..."
-              rows={3}
-              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-red-500"
-            />
-            <div className="flex justify-end gap-2">
+            <div className="space-y-3 overflow-y-auto pr-1 flex-1 py-1">
+              <p className="text-xs text-slate-400">
+                As Room Admin, explain why this campus room should be archived or removed:
+              </p>
+              <textarea
+                value={deletionReasonInput}
+                onChange={(e) => setDeletionReasonInput(e.target.value)}
+                placeholder="e.g., Event has finished or topic completed..."
+                rows={3}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-red-500 resize-none"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800 shrink-0">
               <button
                 type="button"
                 onClick={() => setShowDeletionModal(false)}
-                className="px-4 py-2 text-xs text-slate-400 hover:text-white cursor-pointer"
+                className="px-3.5 py-2 text-xs text-slate-400 hover:text-white cursor-pointer"
               >
                 Cancel
               </button>
@@ -2058,7 +2373,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                   onRequestRoomDeletion(room.id, deletionReasonInput || 'Host requested deletion.');
                   setShowDeletionModal(false);
                 }}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl cursor-pointer"
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl cursor-pointer shadow-md"
               >
                 Submit Request
               </button>
@@ -2070,28 +2385,28 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
       {/* Leave Room Confirmation Modal */}
       {showLeaveConfirmModal && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150"
           onClick={(e) => {
             if (e.target === e.currentTarget) setShowLeaveConfirmModal(false);
           }}
         >
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 space-y-4 text-slate-100 shadow-2xl animate-in zoom-in-95 duration-150">
-            <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-400 flex items-center justify-center mx-auto">
-              <LogOut className="w-6 h-6" />
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-3xl max-w-sm w-full max-h-[85vh] flex flex-col p-4 sm:p-5 space-y-3 sm:space-y-4 text-slate-100 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-400 flex items-center justify-center mx-auto shrink-0">
+              <LogOut className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
 
-            <div className="text-center space-y-1.5">
-              <h3 className="font-extrabold text-base text-white">Leave Room?</h3>
+            <div className="text-center space-y-1.5 overflow-y-auto flex-1">
+              <h3 className="font-extrabold text-sm sm:text-base text-white">Leave Room?</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
                 Are you sure you want to leave <span className="text-orange-400 font-bold">"{room.title}"</span>? You will stop receiving live notifications from this room.
               </p>
             </div>
 
-            <div className="flex gap-2 pt-2">
+            <div className="flex gap-2 pt-2 border-t border-slate-800 shrink-0">
               <button
                 type="button"
                 onClick={() => setShowLeaveConfirmModal(false)}
-                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 transition cursor-pointer"
+                className="flex-1 py-2 sm:py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 transition cursor-pointer"
               >
                 Cancel
               </button>
@@ -2101,7 +2416,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                   setShowLeaveConfirmModal(false);
                   onLeaveRoom?.(room.id);
                 }}
-                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-extrabold text-xs shadow-md shadow-red-600/30 transition cursor-pointer active:scale-95"
+                className="flex-1 py-2 sm:py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-extrabold text-xs shadow-md shadow-red-600/30 transition cursor-pointer active:scale-95"
               >
                 Yes, Leave Room
               </button>
@@ -2113,28 +2428,28 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
       {/* Direct Delete Room Confirmation Modal (For Room Creator & Admin) */}
       {showDirectDeleteModal && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150"
           onClick={(e) => {
             if (e.target === e.currentTarget) setShowDirectDeleteModal(false);
           }}
         >
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 space-y-4 text-slate-100 shadow-2xl animate-in zoom-in-95 duration-150">
-            <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-400 flex items-center justify-center mx-auto">
-              <Trash2 className="w-6 h-6" />
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-3xl max-w-sm w-full max-h-[85vh] flex flex-col p-4 sm:p-5 space-y-3 sm:space-y-4 text-slate-100 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-400 flex items-center justify-center mx-auto shrink-0">
+              <Trash2 className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
 
-            <div className="text-center space-y-1.5">
-              <h3 className="font-extrabold text-base text-white">Delete Room Permanently?</h3>
+            <div className="text-center space-y-1.5 overflow-y-auto flex-1">
+              <h3 className="font-extrabold text-sm sm:text-base text-white">Delete Room Permanently?</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
                 Are you sure you want to delete <span className="text-orange-400 font-bold">"{room.title}"</span>? This will permanently remove the room, all live chat messages, and polls for all students.
               </p>
             </div>
 
-            <div className="flex gap-2 pt-2">
+            <div className="flex gap-2 pt-2 border-t border-slate-800 shrink-0">
               <button
                 type="button"
                 onClick={() => setShowDirectDeleteModal(false)}
-                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 transition cursor-pointer"
+                className="flex-1 py-2 sm:py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 transition cursor-pointer"
               >
                 Cancel
               </button>
@@ -2149,7 +2464,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                     onBack();
                   }
                 }}
-                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-extrabold text-xs shadow-md shadow-red-600/30 transition cursor-pointer active:scale-95"
+                className="flex-1 py-2 sm:py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-extrabold text-xs shadow-md shadow-red-600/30 transition cursor-pointer active:scale-95"
               >
                 Yes, Delete Room
               </button>
@@ -2158,30 +2473,33 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
         </div>
       )}
 
-      {/* Admin Permissions Configuration Modal */}
+      {/* Admin Rights Modal */}
       {configuringRightsUser && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-[80] bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150"
           onClick={(e) => {
             if (e.target === e.currentTarget) setConfiguringRightsUser(null);
           }}
         >
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 text-slate-100 shadow-2xl animate-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center justify-center">
-                  <Shield className="w-4 h-4" />
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl sm:rounded-3xl max-w-md w-full max-h-[85vh] sm:max-h-[90vh] flex flex-col p-4 sm:p-5 space-y-3 sm:space-y-4 text-slate-100 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 shrink-0">
+              <div className="flex items-center gap-2 sm:gap-2.5">
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl sm:rounded-2xl bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center justify-center shrink-0">
+                  <Shield className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />
                 </div>
-                <div>
-                  <h3 className="font-extrabold text-white text-base">
-                    Room Admin Rights
+                <div className="min-w-0">
+                  <h3 className="font-extrabold text-white text-xs sm:text-base truncate">
+                    Admin Rights
                   </h3>
-                  <p className="text-[11px] text-slate-400">
-                    Configure moderation permissions for <span className="text-amber-400 font-bold">@{configuringRightsUser}</span>
+                  <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">
+                    {room.roomAdmins?.includes(configuringRightsUser)
+                      ? `Edit permissions for @${configuringRightsUser}`
+                      : `Configure permissions to promote @${configuringRightsUser}`}
                   </p>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setConfiguringRightsUser(null)}
                 className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
               >
@@ -2189,11 +2507,11 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
               </button>
             </div>
 
-            <div className="space-y-3 py-1">
-              <label className="flex items-center justify-between p-3 rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 transition cursor-pointer">
+            <div className="space-y-2 overflow-y-auto pr-1 flex-1 py-1">
+              <label className="flex items-center justify-between p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 transition cursor-pointer">
                 <div>
                   <div className="text-xs font-bold text-white">🗑️ Delete Messages</div>
-                  <div className="text-[10px] text-slate-400">Can delete abusive or inappropriate messages</div>
+                  <div className="text-[10px] text-slate-400">Can delete inappropriate or spam messages</div>
                 </div>
                 <input
                   type="checkbox"
@@ -2205,10 +2523,10 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                 />
               </label>
 
-              <label className="flex items-center justify-between p-3 rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 transition cursor-pointer">
+              <label className="flex items-center justify-between p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 transition cursor-pointer">
                 <div>
                   <div className="text-xs font-bold text-white">📌 Pin & Unpin Messages</div>
-                  <div className="text-[10px] text-slate-400">Can pin crucial announcements to room top</div>
+                  <div className="text-[10px] text-slate-400">Can pin announcements to the top of the room</div>
                 </div>
                 <input
                   type="checkbox"
@@ -2220,25 +2538,25 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                 />
               </label>
 
-              <label className="flex items-center justify-between p-3 rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 transition cursor-pointer">
+              <label className="flex items-center justify-between p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 transition cursor-pointer">
                 <div>
-                  <div className="text-xs font-bold text-white">📊 Manage Polls</div>
-                  <div className="text-[10px] text-slate-400">Can create & remove live room polls</div>
+                  <div className="text-xs font-bold text-white">📊 Delete & Manage Polls</div>
+                  <div className="text-[10px] text-slate-400">Can create, manage, and delete room polls</div>
                 </div>
                 <input
                   type="checkbox"
-                  checked={editingRights.canManagePolls}
+                  checked={editingRights.canDeletePolls ?? editingRights.canManagePolls}
                   onChange={(e) =>
-                    setEditingRights((prev) => ({ ...prev, canManagePolls: e.target.checked }))
+                    setEditingRights((prev) => ({ ...prev, canDeletePolls: e.target.checked, canManagePolls: e.target.checked }))
                   }
                   className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
                 />
               </label>
 
-              <label className="flex items-center justify-between p-3 rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 transition cursor-pointer">
+              <label className="flex items-center justify-between p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 transition cursor-pointer">
                 <div>
                   <div className="text-xs font-bold text-white">⚙️ Edit Room Details</div>
-                  <div className="text-[10px] text-slate-400">Can modify title, topic description, and location</div>
+                  <div className="text-[10px] text-slate-400">Can modify topic, category, description, and location</div>
                 </div>
                 <input
                   type="checkbox"
@@ -2250,10 +2568,25 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                 />
               </label>
 
-              <label className="flex items-center justify-between p-3 rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 transition cursor-pointer">
+              <label className="flex items-center justify-between p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 transition cursor-pointer">
+                <div>
+                  <div className="text-xs font-bold text-white">🥾 Kick Out Members</div>
+                  <div className="text-[10px] text-slate-400">Can remove disruptive users from the room</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={editingRights.canKickUsers ?? true}
+                  onChange={(e) =>
+                    setEditingRights((prev) => ({ ...prev, canKickUsers: e.target.checked }))
+                  }
+                  className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                />
+              </label>
+
+              <label className="flex items-center justify-between p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 transition cursor-pointer">
                 <div>
                   <div className="text-xs font-bold text-white">🔒 Manage Privacy & Passcode</div>
-                  <div className="text-[10px] text-slate-400">Can toggle public/private status and passcodes</div>
+                  <div className="text-[10px] text-slate-400">Can toggle public/private mode and change passcode</div>
                 </div>
                 <input
                   type="checkbox"
@@ -2266,11 +2599,11 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
               </label>
             </div>
 
-            <div className="flex gap-2 pt-2 border-t border-slate-800">
+            <div className="flex gap-2 pt-2.5 border-t border-slate-800 shrink-0">
               <button
                 type="button"
                 onClick={() => setConfiguringRightsUser(null)}
-                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 transition cursor-pointer"
+                className="flex-1 py-2 sm:py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 transition cursor-pointer"
               >
                 Cancel
               </button>
@@ -2280,9 +2613,63 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                   onPromoteRoomAdmin?.(room.id, configuringRightsUser, editingRights);
                   setConfiguringRightsUser(null);
                 }}
-                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white font-extrabold text-xs shadow-lg shadow-amber-500/20 transition cursor-pointer active:scale-95"
+                className="flex-1 py-2 sm:py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white font-extrabold text-xs shadow-lg shadow-amber-500/20 transition cursor-pointer active:scale-95"
               >
-                Save Rights
+                {room.roomAdmins?.includes(configuringRightsUser) ? 'Update Rights' : 'Promote to Admin'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Kick Out Member Confirmation Modal */}
+      {kickingTargetUser && (
+        <div
+          className="fixed inset-0 z-[80] bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setKickingTargetUser(null);
+          }}
+        >
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl sm:rounded-3xl max-w-sm w-full max-h-[85vh] flex flex-col p-4 sm:p-5 space-y-3 sm:space-y-4 text-slate-100 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl sm:rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/40 flex items-center justify-center text-base shrink-0">
+                🥾
+              </div>
+              <div className="min-w-0">
+                <h3 className="font-extrabold text-white text-sm sm:text-base truncate">
+                  Kick Out Member
+                </h3>
+                <p className="text-xs text-slate-400 truncate">
+                  Remove <span className="text-rose-400 font-bold">@{kickingTargetUser}</span> from this room?
+                </p>
+              </div>
+            </div>
+
+            <div className="overflow-y-auto flex-1">
+              <p className="text-xs text-slate-300 bg-slate-950/80 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border border-slate-800 leading-relaxed">
+                This member will be removed from the active room members list immediately.
+              </p>
+            </div>
+
+            <div className="flex gap-2 pt-2 border-t border-slate-800 shrink-0">
+              <button
+                type="button"
+                onClick={() => setKickingTargetUser(null)}
+                className="flex-1 py-2 sm:py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onKickUser) {
+                    onKickUser(room.id, kickingTargetUser);
+                  }
+                  setKickingTargetUser(null);
+                }}
+                className="flex-1 py-2 sm:py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs shadow-lg shadow-rose-600/30 transition cursor-pointer active:scale-95"
+              >
+                Kick Out
               </button>
             </div>
           </div>
