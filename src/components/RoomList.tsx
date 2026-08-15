@@ -116,10 +116,10 @@ export const RoomList: React.FC<RoomListProps> = ({
           </div>
 
           <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-white mb-2">
-            Campus Live Rooms & Student Discussions
+            Live Rooms & Discussions
           </h2>
           <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-            Public rooms for campus discussions, private invite-only rooms, and real-time student polls. Join any room to chat live!
+            Public rooms for discussions, private invite-only rooms, and real-time student polls. Join any room to chat live!
           </p>
         </div>
       </div>

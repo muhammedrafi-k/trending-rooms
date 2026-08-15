@@ -187,7 +187,7 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-300 mt-0.5">
-                        Direct chat for important doubts, app issues, and campus support.
+                        Contact for Support.
                       </p>
                     </div>
                   </div>
