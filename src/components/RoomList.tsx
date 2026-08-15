@@ -236,13 +236,13 @@ export const RoomList: React.FC<RoomListProps> = ({
           <p className="text-xs text-slate-500">
             {selectedFilter === 'joined'
               ? 'Browse public rooms and click Join to participate in campus discussions!'
-              : `Be the first student to create a room for ${currentCollege.shortName}!`}
+              : `Be the first one to create a room for ${currentCollege.shortName}!`}
           </p>
           <button
             onClick={onOpenCreateRoom}
             className="px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs shadow-sm transition cursor-pointer"
           >
-            🔥 Create Campus Room Now
+            🔥 Create Room Now
           </button>
         </div>
       )}
