@@ -260,23 +260,23 @@ export default function App() {
   }, [currentUser]);
 
   useEffect(() => {
-    localStorage.setItem('CAMPUS_SELECTED_COLLEGE', JSON.stringify(currentCollege));
+    localStorage.setItem('CAMPUS_SELECTED_COLLEGE_V2', JSON.stringify(currentCollege));
   }, [currentCollege]);
 
   useEffect(() => {
-    localStorage.setItem('TRENDING_ROOMS_STATE_V3', JSON.stringify(rooms));
+    localStorage.setItem('TRENDING_ROOMS_STATE_V4', JSON.stringify(rooms));
   }, [rooms]);
 
   useEffect(() => {
-    localStorage.setItem('TRENDING_MESSAGES_STATE_V3', JSON.stringify(messagesMap));
+    localStorage.setItem('TRENDING_MESSAGES_STATE_V4', JSON.stringify(messagesMap));
   }, [messagesMap]);
 
   useEffect(() => {
-    localStorage.setItem('TRENDING_FEED_POSTS_V3', JSON.stringify(posts));
+    localStorage.setItem('TRENDING_FEED_POSTS_V4', JSON.stringify(posts));
   }, [posts]);
 
   useEffect(() => {
-    localStorage.setItem('TRENDING_REPORTS_STATE_V3', JSON.stringify(reports));
+    localStorage.setItem('TRENDING_REPORTS_STATE_V4', JSON.stringify(reports));
   }, [reports]);
 
   useEffect(() => {
@@ -514,35 +514,78 @@ export default function App() {
     ).length;
   }, [privateMessages, currentUser.username]);
 
+  // Load and Subscribe to Notifications for Current User
+  useEffect(() => {
+    if (!currentUser.username) return;
+
+    // Load persisted notifications
+    supabaseService.getNotifications(currentUser.username).then((persisted) => {
+      if (persisted && persisted.length > 0) {
+        setNotifications((prev) => {
+          const combined = [...persisted, ...prev];
+          const seen = new Set<string>();
+          return combined.filter((n) => {
+            if (seen.has(n.id)) return false;
+            seen.add(n.id);
+            return true;
+          });
+        });
+      }
+    });
+
+    // Realtime Supabase notifications subscription
+    const unsubNotifs = supabaseService.subscribeToNotifications(
+      currentUser.username,
+      (newNotif) => {
+        setNotifications((prev) => {
+          if (prev.some((n) => n.id === newNotif.id)) return prev;
+          return [newNotif, ...prev];
+        });
+        sendOutsideNotification(newNotif.title, newNotif.message);
+      }
+    );
+
+    return () => {
+      unsubNotifs();
+    };
+  }, [currentUser.username]);
+
   // Realtime Multi-tab sync
   useEffect(() => {
     const unsubscribe = broadcastEngine.subscribe((payload) => {
       if (payload.type === 'NEW_MESSAGE') {
         const msg = payload.message;
-        setMessagesMap((prev) => ({
-          ...prev,
-          [msg.roomId]: [...(prev[msg.roomId] || []), msg],
-        }));
+        setMessagesMap((prev) => {
+          const list = prev[msg.roomId] || [];
+          if (list.some((m) => m.id === msg.id)) return prev;
+          return {
+            ...prev,
+            [msg.roomId]: [...list, msg],
+          };
+        });
         setRooms((prev) =>
           prev.map((r) =>
             r.id === msg.roomId
               ? {
                   ...r,
                   lastActivityAt: new Date().toISOString(),
-                  activePeopleCount: r.activePeopleCount + 1,
+                  activePeopleCount: Math.max(1, (r.activeMembers || []).length),
                   hasActivePoll: r.hasActivePoll || !!msg.poll,
                 }
               : r
           )
         );
       } else if (payload.type === 'POLL_VOTE') {
-        const { roomId, messageId, optionId } = payload;
+        const { roomId, messageId, optionId, pollData } = payload;
         setMessagesMap((prev) => {
           const list = prev[roomId] || [];
           return {
             ...prev,
             [roomId]: list.map((m) => {
               if (m.id === messageId && m.poll) {
+                if (pollData) {
+                  return { ...m, poll: pollData };
+                }
                 return {
                   ...m,
                   poll: {
@@ -593,6 +636,11 @@ export default function App() {
       } else if (payload.type === 'NEW_ROOM') {
         const newRoom = payload.room;
         setRooms((prev) => [newRoom, ...prev.filter((r) => r.id !== newRoom.id)]);
+      } else if (payload.type === 'ROOM_UPDATED') {
+        const updatedRoom = payload.room;
+        setRooms((prev) =>
+          prev.map((r) => (r.id === updatedRoom.id ? { ...r, ...updatedRoom } : r))
+        );
       } else if (payload.type === 'DELETE_MESSAGE') {
         const { roomId, messageId } = payload;
         setMessagesMap((prev) => ({
@@ -616,11 +664,28 @@ export default function App() {
       } else if (payload.type === 'DELETE_POST') {
         const { postId } = payload;
         setPosts((prev) => prev.filter((p) => p.id !== postId));
+      } else if (payload.type === 'USER_UPDATED') {
+        const { oldUsername, newProfile } = payload;
+        applyUserUpdateEverywhere(oldUsername, newProfile);
+      } else if (payload.type === 'NOTIFICATION') {
+        const notif = payload.notification;
+        if (
+          notif &&
+          notif.recipientUsername &&
+          currentUser.username &&
+          notif.recipientUsername.toLowerCase() === currentUser.username.toLowerCase()
+        ) {
+          setNotifications((prev) => {
+            if (prev.some((n) => n.id === notif.id)) return prev;
+            return [notif, ...prev];
+          });
+          sendOutsideNotification(notif.title, notif.message);
+        }
       }
     });
 
     return unsubscribe;
-  }, [currentRoomId]);
+  }, [currentRoomId, currentUser.username]);
 
   // Helper check for registration requirement before participation
   const requireRegistration = (actionName: string, callback: () => void) => {
@@ -660,7 +725,7 @@ export default function App() {
         : `@${currentUser.username}`;
 
       const newMsg: ChatMessage = {
-        id: `msg-${Date.now()}`,
+        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         roomId: currentRoomId,
         senderName,
         senderUsername: isAnonymous ? undefined : currentUser.username,
@@ -683,28 +748,42 @@ export default function App() {
       // Async write to Supabase
       supabaseService.sendMessage(newMsg);
 
+      // Ensure active member count is up-to-date
       setRooms((prev) =>
-        prev.map((r) =>
-          r.id === currentRoomId
-            ? {
-                ...r,
-                lastActivityAt: new Date().toISOString(),
-                activePeopleCount: r.activePeopleCount + 1,
-              }
-            : r
-        )
+        prev.map((r) => {
+          if (r.id === currentRoomId) {
+            const hasSender = !isAnonymous && currentUser.username && (r.activeMembers || []).includes(currentUser.username);
+            const updatedActive = hasSender || isAnonymous
+              ? (r.activeMembers || [])
+              : [...(r.activeMembers || []), currentUser.username];
+
+            return {
+              ...r,
+              lastActivityAt: new Date().toISOString(),
+              activeMembers: updatedActive,
+              activePeopleCount: Math.max(1, updatedActive.length),
+            };
+          }
+          return r;
+        })
       );
 
       broadcastEngine.broadcast({ type: 'NEW_MESSAGE', message: newMsg });
 
-      // Trigger notifications for @mentions
+      // Trigger notifications for @mentions (ONLY for the tagged recipient, NEVER the sender)
       if (mentions && mentions.length > 0) {
         const currentRoom = rooms.find((r) => r.id === currentRoomId);
         const roomTitle = currentRoom ? currentRoom.title : 'a live room';
         mentions.forEach((m) => {
+          const cleanRecipient = m.trim().toLowerCase().replace(/^@/, '');
+          const cleanSender = currentUser.username.trim().toLowerCase().replace(/^@/, '');
+
+          // Do NOT send notification to the sender themselves
+          if (cleanRecipient === cleanSender) return;
+
           const notif: AppNotification = {
-            id: `notif-${Date.now()}-${Math.random()}`,
-            recipientUsername: m,
+            id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            recipientUsername: cleanRecipient,
             title: `💬 Mentioned by @${currentUser.username}`,
             message: `@${currentUser.username} tagged you in "${roomTitle}": "${finalContent.slice(0, 60)}"`,
             type: 'mention',
@@ -713,11 +792,15 @@ export default function App() {
             timestamp: new Date().toISOString(),
             isRead: false,
           };
-          setNotifications((prev) => [notif, ...prev]);
-          sendOutsideNotification(
-            `💬 Mentioned by @${currentUser.username}`,
-            `Tagged in ${roomTitle}: "${finalContent.slice(0, 50)}"`
-          );
+
+          // Persist notification in database for recipient
+          supabaseService.saveNotification(notif);
+
+          // Broadcast notification to other tabs / devices
+          broadcastEngine.broadcast({
+            type: 'NOTIFICATION',
+            notification: notif,
+          });
         });
       }
     });
@@ -751,17 +834,34 @@ export default function App() {
   };
 
   const handleRequestRoomDeletion = (roomId: string, reason: string) => {
+    let updatedTargetRoom: TrendingRoom | undefined;
     setRooms((prev) =>
-      prev.map((r) =>
-        r.id === roomId
-          ? {
-              ...r,
-              deletionRequested: true,
-              deletionReason: reason,
-            }
-          : r
-      )
+      prev.map((r) => {
+        if (r.id === roomId) {
+          updatedTargetRoom = {
+            ...r,
+            deletionRequested: true,
+            deletionReason: reason,
+            deletionRequestedBy: currentUser.username,
+          };
+          return updatedTargetRoom;
+        }
+        return r;
+      })
     );
+
+    supabaseService.updateRoom(roomId, {
+      deletionRequested: true,
+      deletionReason: reason,
+      deletionRequestedBy: currentUser.username,
+    });
+
+    if (updatedTargetRoom) {
+      broadcastEngine.broadcast({
+        type: 'ROOM_UPDATED',
+        room: updatedTargetRoom,
+      });
+    }
 
     // Add to reports queue for Developer Admin review
     const newReport: ReportItem = {
@@ -776,7 +876,40 @@ export default function App() {
     };
 
     setReports((prev) => [newReport, ...prev]);
-    alert('Room deletion request submitted! Developer/Admin system will review shortly.');
+    showToast('⚠️ Room deletion request submitted and pinned for review!', 'info');
+  };
+
+  const handleCancelRoomDeletionRequest = (roomId: string) => {
+    let updatedTargetRoom: TrendingRoom | undefined;
+    setRooms((prev) =>
+      prev.map((r) => {
+        if (r.id === roomId) {
+          updatedTargetRoom = {
+            ...r,
+            deletionRequested: false,
+            deletionReason: undefined,
+            deletionRequestedBy: undefined,
+          };
+          return updatedTargetRoom;
+        }
+        return r;
+      })
+    );
+
+    supabaseService.updateRoom(roomId, {
+      deletionRequested: false,
+      deletionReason: null as any,
+      deletionRequestedBy: null as any,
+    });
+
+    if (updatedTargetRoom) {
+      broadcastEngine.broadcast({
+        type: 'ROOM_UPDATED',
+        room: updatedTargetRoom,
+      });
+    }
+
+    showToast('✅ Room deletion request cancelled.', 'info');
   };
 
   const handlePromoteRoomAdmin = (
@@ -789,82 +922,144 @@ export default function App() {
         canDeleteMessages: true,
         canPinMessages: true,
         canManagePolls: true,
+        canChangePrivacy: true,
+        canEditRoom: true,
       };
+
+      let newAdminsList: string[] = [];
+      let newRightsMap: Record<string, RoomAdminRights> = {};
+      let updatedRoomObj: TrendingRoom | undefined;
 
       setRooms((prev) =>
         prev.map((r) => {
           if (r.id === roomId) {
             const currentAdmins = r.roomAdmins || [];
-            const newAdmins = currentAdmins.includes(targetUsername)
+            newAdminsList = currentAdmins.includes(targetUsername)
               ? currentAdmins
               : [...currentAdmins, targetUsername];
-            const newRights = {
+            newRightsMap = {
               ...(r.roomAdminRights || {}),
               [targetUsername]: defaultRights,
             };
-            return {
+            updatedRoomObj = {
               ...r,
-              roomAdmins: newAdmins,
-              roomAdminRights: newRights,
+              roomAdmins: newAdminsList,
+              roomAdminRights: newRightsMap,
             };
+            return updatedRoomObj;
           }
           return r;
         })
       );
 
-      // Trigger notification for target user
-      const adminNotif: AppNotification = {
-        id: `notif-admin-${Date.now()}`,
-        recipientUsername: targetUsername,
-        title: '🛡️ Promoted to Room Admin!',
-        message: `@${currentUser.username} granted you admin moderation rights in this room.`,
-        type: 'room_admin',
-        fromUsername: currentUser.username,
-        roomId,
-        timestamp: new Date().toISOString(),
-        isRead: false,
-      };
-      setNotifications((prev) => [adminNotif, ...prev]);
-      sendOutsideNotification(
-        '🛡️ Promoted to Room Admin!',
-        `@${currentUser.username} granted you admin moderation rights.`
-      );
+      supabaseService.updateRoom(roomId, {
+        roomAdmins: newAdminsList,
+        roomAdminRights: newRightsMap,
+      });
+
+      if (updatedRoomObj) {
+        broadcastEngine.broadcast({
+          type: 'ROOM_UPDATED',
+          room: updatedRoomObj,
+        });
+      }
+
+      // Trigger notification ONLY for the target promoted user
+      const cleanTarget = targetUsername.trim().toLowerCase().replace(/^@/, '');
+      const cleanSender = currentUser.username.trim().toLowerCase().replace(/^@/, '');
+
+      if (cleanTarget !== cleanSender) {
+        const adminNotif: AppNotification = {
+          id: `notif-admin-${Date.now()}`,
+          recipientUsername: targetUsername,
+          title: '🛡️ Promoted to Room Admin!',
+          message: `@${currentUser.username} granted you admin moderation rights in "${updatedRoomObj?.title || 'campus room'}".`,
+          type: 'room_admin',
+          fromUsername: currentUser.username,
+          roomId,
+          linkRoomId: roomId,
+          timestamp: new Date().toISOString(),
+          isRead: false,
+        };
+
+        supabaseService.saveNotification(adminNotif);
+        broadcastEngine.broadcast({
+          type: 'NOTIFICATION',
+          notification: adminNotif,
+        });
+      }
+
+      showToast(`👑 Updated admin rights for @${targetUsername}!`, 'success');
     });
   };
 
   const handleDemoteRoomAdmin = (roomId: string, targetUsername: string) => {
     requireRegistration('manage room admins', () => {
+      let updatedAdmins: string[] = [];
+      let updatedRights: Record<string, RoomAdminRights> = {};
+      let updatedRoomObj: TrendingRoom | undefined;
+
       setRooms((prev) =>
         prev.map((r) => {
           if (r.id === roomId) {
-            const updatedAdmins = (r.roomAdmins || []).filter((u) => u !== targetUsername);
-            const updatedRights = { ...(r.roomAdminRights || {}) };
+            updatedAdmins = (r.roomAdmins || []).filter((u) => u !== targetUsername);
+            updatedRights = { ...(r.roomAdminRights || {}) };
             delete updatedRights[targetUsername];
-            return {
+            updatedRoomObj = {
               ...r,
               roomAdmins: updatedAdmins,
               roomAdminRights: updatedRights,
             };
+            return updatedRoomObj;
           }
           return r;
         })
       );
+
+      supabaseService.updateRoom(roomId, {
+        roomAdmins: updatedAdmins,
+        roomAdminRights: updatedRights,
+      });
+
+      if (updatedRoomObj) {
+        broadcastEngine.broadcast({
+          type: 'ROOM_UPDATED',
+          room: updatedRoomObj,
+        });
+      }
+
+      showToast(`🔻 Removed admin rights for @${targetUsername}.`, 'info');
     });
   };
 
   const handlePinMessage = (roomId: string, messageId: string | null) => {
     requireRegistration('pin messages', () => {
+      let updatedRoomObj: TrendingRoom | undefined;
       setRooms((prev) =>
         prev.map((r) => {
           if (r.id === roomId) {
-            return {
+            updatedRoomObj = {
               ...r,
               pinnedMessageId: messageId,
             };
+            return updatedRoomObj;
           }
           return r;
         })
       );
+
+      supabaseService.updateRoom(roomId, {
+        pinnedMessageId: messageId,
+      });
+
+      if (updatedRoomObj) {
+        broadcastEngine.broadcast({
+          type: 'ROOM_UPDATED',
+          room: updatedRoomObj,
+        });
+      }
+
+      showToast(messageId ? '📌 Message pinned to top!' : 'Message unpinned.', 'info');
     });
   };
 
@@ -872,21 +1067,46 @@ export default function App() {
     if (!currentRoomId) return;
 
     requireRegistration('vote in polls', () => {
+      let updatedPollData: PollData | null = null;
+
       setMessagesMap((prev) => {
         const list = prev[currentRoomId] || [];
         return {
           ...prev,
           [currentRoomId]: list.map((m) => {
             if (m.id === messageId && m.poll) {
+              const currentVoter = currentUser.username;
+              
+              const newOptions = m.poll.options.map((opt) => {
+                const isCurrentlyVotedInThisOption = (opt.voters || []).includes(currentVoter);
+                if (opt.id === optionId) {
+                  if (isCurrentlyVotedInThisOption) return opt;
+                  return {
+                    ...opt,
+                    votes: opt.votes + 1,
+                    voters: [...(opt.voters || []), currentVoter],
+                  };
+                } else if (isCurrentlyVotedInThisOption) {
+                  return {
+                    ...opt,
+                    votes: Math.max(0, opt.votes - 1),
+                    voters: (opt.voters || []).filter((u) => u !== currentVoter),
+                  };
+                }
+                return opt;
+              });
+
+              const newTotal = newOptions.reduce((sum, opt) => sum + opt.votes, 0);
+
+              updatedPollData = {
+                ...m.poll,
+                totalVotes: newTotal,
+                options: newOptions,
+              };
+
               return {
                 ...m,
-                poll: {
-                  ...m.poll,
-                  totalVotes: m.poll.totalVotes + 1,
-                  options: m.poll.options.map((opt) =>
-                    opt.id === optionId ? { ...opt, votes: opt.votes + 1 } : opt
-                  ),
-                },
+                poll: updatedPollData,
               };
             }
             return m;
@@ -894,12 +1114,17 @@ export default function App() {
         };
       });
 
-      broadcastEngine.broadcast({
-        type: 'POLL_VOTE',
-        roomId: currentRoomId,
-        messageId,
-        optionId,
-      });
+      if (updatedPollData) {
+        supabaseService.updateMessagePoll(messageId, updatedPollData);
+        broadcastEngine.broadcast({
+          type: 'POLL_VOTE',
+          roomId: currentRoomId,
+          messageId,
+          optionId,
+          pollData: updatedPollData,
+        });
+        showToast('🗳️ Vote recorded!', 'success');
+      }
     });
   };
 
@@ -942,6 +1167,13 @@ export default function App() {
         ...prev,
         [currentRoomId]: [...(prev[currentRoomId] || []), pollMsg],
       }));
+
+      supabaseService.sendMessage(pollMsg);
+
+      supabaseService.updateRoom(currentRoomId, {
+        lastActivityAt: new Date().toISOString(),
+        hasActivePoll: true,
+      });
 
       setRooms((prev) =>
         prev.map((r) =>
@@ -1049,7 +1281,7 @@ export default function App() {
     if (!matchedRoom) {
       return {
         success: false,
-        message: 'No private room found with that code or link. Please check and try again.',
+        message: 'No private room found with that code or link. Please check with the room host and try again.',
       };
     }
 
@@ -1057,10 +1289,14 @@ export default function App() {
       setUnlockedPrivateRoomIds((prev) => [...prev, matchedRoom.id]);
     }
 
-    showToast(`🔓 Private room "${matchedRoom.title}" unlocked!`, 'success');
+    // Auto join and enter the room
+    handleJoinRoom(matchedRoom.id, matchedRoom.inviteCode || query);
+    setCurrentRoomId(matchedRoom.id);
+
+    showToast(`🔓 Private room "${matchedRoom.title}" unlocked & joined!`, 'success');
     return {
       success: true,
-      message: `Access granted! Unlocked "${matchedRoom.title}".`,
+      message: `Access granted! Unlocked and joined "${matchedRoom.title}".`,
     };
   };
 
@@ -1228,7 +1464,158 @@ export default function App() {
     showToast('⚙️ Room details updated successfully!', 'success');
   };
 
-  const handleJoinRoom = (roomId: string) => {
+  const applyUserUpdateEverywhere = (oldUsername: string, newProf: UserProfile) => {
+    const cleanOld = oldUsername.trim().toLowerCase().replace(/^@/, '');
+    const cleanNew = newProf.username.trim().toLowerCase().replace(/^@/, '');
+    const newDisplayName = newProf.displayName?.trim() || cleanNew;
+    const newBadge = newProf.badge || '🎓 Campus Member';
+
+    // 1. Update messagesMap across all rooms
+    setMessagesMap((prev) => {
+      let hasChanges = false;
+      const nextMap: Record<string, ChatMessage[]> = {};
+
+      Object.entries(prev).forEach(([roomId, msgs]) => {
+        nextMap[roomId] = msgs.map((m) => {
+          const isSender = m.senderUsername && m.senderUsername.toLowerCase() === cleanOld;
+          const mentionsOld = m.mentions && m.mentions.some((u) => u.toLowerCase() === cleanOld);
+          if (isSender || mentionsOld) {
+            hasChanges = true;
+            const updatedMentions = m.mentions
+              ? m.mentions.map((u) => (u.toLowerCase() === cleanOld ? cleanNew : u))
+              : m.mentions;
+
+            return {
+              ...m,
+              senderUsername: isSender ? cleanNew : m.senderUsername,
+              senderName: isSender
+                ? m.isAnonymous
+                  ? m.senderName
+                  : m.senderName.startsWith('@')
+                  ? `@${cleanNew}`
+                  : newDisplayName
+                : m.senderName,
+              senderBadge: isSender ? newBadge : m.senderBadge,
+              mentions: updatedMentions,
+            };
+          }
+          return m;
+        });
+      });
+
+      return hasChanges ? nextMap : prev;
+    });
+
+    // 2. Update feed posts
+    setPosts((prev) =>
+      prev.map((p) => {
+        const isAuthor = p.authorUsername && p.authorUsername.toLowerCase() === cleanOld;
+        const hasUpvoted = p.upvoters && p.upvoters.some((u) => u.toLowerCase() === cleanOld);
+        if (isAuthor || hasUpvoted) {
+          return {
+            ...p,
+            authorUsername: isAuthor ? cleanNew : p.authorUsername,
+            authorDisplayName: isAuthor ? newDisplayName : p.authorDisplayName,
+            authorBadge: isAuthor ? newBadge : p.authorBadge,
+            upvoters: hasUpvoted
+              ? p.upvoters.map((u) => (u.toLowerCase() === cleanOld ? cleanNew : u))
+              : p.upvoters,
+          };
+        }
+        return p;
+      })
+    );
+
+    // 3. Update rooms
+    setRooms((prev) =>
+      prev.map((r) => {
+        const isCreator = r.creatorUsername && r.creatorUsername.toLowerCase() === cleanOld;
+        const inActive = r.activeMembers && r.activeMembers.some((u) => u.toLowerCase() === cleanOld);
+        const inAllowed = r.allowedUsers && r.allowedUsers.some((u) => u.toLowerCase() === cleanOld);
+        const inAdmins = r.roomAdmins && r.roomAdmins.some((u) => u.toLowerCase() === cleanOld);
+        const hasRights = r.roomAdminRights && (r.roomAdminRights[cleanOld] || r.roomAdminRights[oldUsername]);
+        const hasLogs = r.roomLogs && r.roomLogs.some((l) => l.username.toLowerCase() === cleanOld);
+
+        if (isCreator || inActive || inAllowed || inAdmins || hasRights || hasLogs) {
+          const updatedRights = { ...(r.roomAdminRights || {}) };
+          if (hasRights) {
+            const rightsVal = updatedRights[cleanOld] || updatedRights[oldUsername];
+            updatedRights[cleanNew] = rightsVal;
+            delete updatedRights[cleanOld];
+            delete updatedRights[oldUsername];
+          }
+
+          const updatedLogs = (r.roomLogs || []).map((l) =>
+            l.username.toLowerCase() === cleanOld
+              ? { ...l, username: cleanNew, displayName: newDisplayName }
+              : l
+          );
+
+          return {
+            ...r,
+            creatorUsername: isCreator ? cleanNew : r.creatorUsername,
+            creatorName: isCreator ? newDisplayName : r.creatorName,
+            activeMembers: inActive
+              ? (r.activeMembers || []).map((u) => (u.toLowerCase() === cleanOld ? cleanNew : u))
+              : r.activeMembers,
+            allowedUsers: inAllowed
+              ? (r.allowedUsers || []).map((u) => (u.toLowerCase() === cleanOld ? cleanNew : u))
+              : r.allowedUsers,
+            roomAdmins: inAdmins
+              ? (r.roomAdmins || []).map((u) => (u.toLowerCase() === cleanOld ? cleanNew : u))
+              : r.roomAdmins,
+            roomAdminRights: updatedRights,
+            roomLogs: updatedLogs,
+          };
+        }
+        return r;
+      })
+    );
+
+    // 4. Update private messages
+    setPrivateMessages((prev) =>
+      prev.map((pm) => {
+        const isSender = pm.senderUsername.toLowerCase() === cleanOld;
+        const isRecipient = pm.recipientUsername.toLowerCase() === cleanOld;
+        if (isSender || isRecipient) {
+          return {
+            ...pm,
+            senderUsername: isSender ? cleanNew : pm.senderUsername,
+            senderDisplayName: isSender ? newDisplayName : pm.senderDisplayName,
+            recipientUsername: isRecipient ? cleanNew : pm.recipientUsername,
+          };
+        }
+        return pm;
+      })
+    );
+
+    // 5. Update notifications
+    setNotifications((prev) =>
+      prev.map((n) => {
+        const isRecipient = n.recipientUsername.toLowerCase() === cleanOld;
+        const isFrom = n.fromUsername && n.fromUsername.toLowerCase() === cleanOld;
+        if (isRecipient || isFrom) {
+          return {
+            ...n,
+            recipientUsername: isRecipient ? cleanNew : n.recipientUsername,
+            fromUsername: isFrom ? cleanNew : n.fromUsername,
+          };
+        }
+        return n;
+      })
+    );
+
+    // 6. Update registered DB users list
+    setDbUsers((prev) => {
+      const exists = prev.some((u) => u.id === newProf.id || u.username.toLowerCase() === cleanOld);
+      if (exists) {
+        return prev.map((u) => (u.id === newProf.id || u.username.toLowerCase() === cleanOld ? newProf : u));
+      }
+      return [newProf, ...prev];
+    });
+  };
+
+  const handleJoinRoom = (roomId: string, codeInput?: string) => {
     requireRegistration('join campus rooms', () => {
       const room = rooms.find((r) => r.id === roomId);
       if (!room) return;
@@ -1241,6 +1628,24 @@ export default function App() {
       if (isCreator) {
         showToast('👑 You are the room creator and already an active member.', 'info');
         return;
+      }
+
+      // If room is private and not yet unlocked by user or admin, enforce valid passcode
+      const isAlreadyUnlocked = unlockedPrivateRoomIds.includes(roomId) || currentUser.isAdmin;
+
+      if (room.isPrivate && !isAlreadyUnlocked) {
+        const cleanInput = (codeInput || '').trim().toUpperCase();
+        const expectedCode = (room.inviteCode || '').trim().toUpperCase();
+
+        if (!cleanInput || cleanInput !== expectedCode) {
+          showToast('🔒 Private room requires a valid invite code to join.', 'error');
+          return;
+        }
+
+        // Passcode verified! Unlock room for this user
+        setUnlockedPrivateRoomIds((prev) =>
+          prev.includes(roomId) ? prev : [...prev, roomId]
+        );
       }
 
       const isAlreadyJoined = Array.isArray(room.activeMembers) && room.activeMembers.includes(currentUser.username);
@@ -1348,14 +1753,37 @@ export default function App() {
     showToast(`🚪 You left "${room.title}".`, 'info');
   };
 
-  const handleSaveProfile = (prof: UserProfile) => {
+  const handleSaveProfile = (
+    prof: UserProfile,
+    actionType?: 'login' | 'register' | 'update'
+  ) => {
+    const oldUsername = currentUser.username;
+    const oldDisplayName = currentUser.displayName;
+
     setCurrentUser(prof);
     setIsUserProfileOpen(false);
     setRequiredActionForProfile(undefined);
 
-    // Persist profile to Supabase Database
-    supabaseService.saveProfile(prof);
-    showToast(`🎉 Welcome @${prof.username}! Account synchronized successfully.`, 'success');
+    // If username, display name or badge changed, cascade everywhere across local state, DB and live broadcast
+    if (oldUsername && (oldUsername !== prof.username || oldDisplayName !== prof.displayName || currentUser.badge !== prof.badge)) {
+      applyUserUpdateEverywhere(oldUsername, prof);
+      supabaseService.updateUserEverywhere(oldUsername, prof);
+      broadcastEngine.broadcast({
+        type: 'USER_UPDATED',
+        oldUsername,
+        newProfile: prof,
+      });
+    } else {
+      supabaseService.saveProfile(prof);
+    }
+
+    if (actionType === 'login') {
+      showToast(`👋 Welcome back, @${prof.username}! Signed in successfully.`, 'success');
+    } else if (actionType === 'register') {
+      showToast(`🎉 Account created! Welcome to Campus Live Spot, @${prof.username}!`, 'success');
+    } else {
+      showToast(`🎉 Profile updated! Welcome @${prof.username}.`, 'success');
+    }
   };
 
   const handleDeleteRoom = async (roomId: string) => {
@@ -1518,6 +1946,7 @@ export default function App() {
             onDeleteMessage={handleDeleteMessage}
             onDeletePoll={handleDeletePoll}
             onRequestRoomDeletion={handleRequestRoomDeletion}
+            onCancelRoomDeletionRequest={handleCancelRoomDeletionRequest}
             onReportItem={(type, id, preview) =>
               setReportTarget({ targetType: type, targetId: id, roomId: currentRoomId, contentPreview: preview })
             }
@@ -1708,8 +2137,24 @@ export default function App() {
           }}
           onRejectRoomDeletionRequest={(roomId) => {
             setRooms((prev) =>
-              prev.map((r) => (r.id === roomId ? { ...r, deletionRequested: false } : r))
+              prev.map((r) =>
+                r.id === roomId
+                  ? {
+                      ...r,
+                      deletionRequested: false,
+                      deletionReason: undefined,
+                      deletionRequestedBy: undefined,
+                    }
+                  : r
+              )
             );
+            supabaseService.updateRoom(roomId, {
+              deletionRequested: false,
+              deletionReason: '',
+              deletionRequestedBy: '',
+            });
+            setReports((prev) => prev.filter((r) => r.targetId !== roomId));
+            showToast('Room deletion request rejected.', 'info');
           }}
           onUpdateSettings={(newSet) => setModerationSettings(newSet)}
           onSendDeveloperAlert={(recipientUsername, msgText) => {

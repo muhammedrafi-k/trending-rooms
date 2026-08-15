@@ -137,6 +137,7 @@ export interface TrendingRoom {
   pinnedMessageId?: string | null; // Pinned chat message ID
   deletionRequested?: boolean;
   deletionReason?: string;
+  deletionRequestedBy?: string;
   topContributor?: {
     name: string;
     badge: string;

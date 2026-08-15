@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS rooms (
   pinned_message_id TEXT,
   deletion_requested BOOLEAN DEFAULT FALSE,
   deletion_reason TEXT,
+  deletion_requested_by TEXT,
   top_contributor JSONB DEFAULT NULL
 );
 

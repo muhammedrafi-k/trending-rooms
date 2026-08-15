@@ -5,7 +5,7 @@ import { User, Shield, Check, Lock, AlertCircle, LogOut, KeyRound, UserCheck, X,
 
 interface UserProfileModalProps {
   currentUser: UserProfile;
-  onSaveProfile: (profile: UserProfile) => void;
+  onSaveProfile: (profile: UserProfile, actionType?: 'login' | 'register' | 'update') => void;
   onLogout?: () => void;
   onClose: () => void;
   onOpenAdminPanel?: () => void;
@@ -179,7 +179,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       return;
     }
 
-    onSaveProfile(updatedProfile);
+    onSaveProfile(updatedProfile, 'update');
     setIsEditingProfile(false);
   };
 
@@ -253,7 +253,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       return;
     }
 
-    onSaveProfile(updatedProfile);
+    onSaveProfile(updatedProfile, 'register');
   };
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
@@ -274,7 +274,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     const foundProfile: UserProfile | null = await supabaseService.authenticateUser(rawInput, loginPassword.trim());
 
     if (foundProfile) {
-      onSaveProfile(foundProfile);
+      onSaveProfile(foundProfile, 'login');
     } else {
       setError('Account not found in Supabase database or password incorrect. Please create a new profile or check your credentials.');
       return;

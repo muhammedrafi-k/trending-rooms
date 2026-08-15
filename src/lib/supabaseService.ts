@@ -8,6 +8,7 @@ import {
   AppNotification,
   CollegeInfo,
   UserProfile,
+  PollData,
 } from '../types';
 import {
   COLLEGES as DEFAULT_COLLEGES,
@@ -15,6 +16,44 @@ import {
   INITIAL_MESSAGES,
   INITIAL_POSTS,
 } from '../data/mockRooms';
+
+// In-memory set of known missing columns per table to avoid repeated PGRST204 errors
+const knownMissingTableColumns: Record<string, Set<string>> = {
+  rooms: new Set<string>(),
+  users: new Set<string>(),
+  profiles: new Set<string>(),
+  messages: new Set<string>(),
+  feed_posts: new Set<string>(),
+  feed_comments: new Set<string>(),
+  private_messages: new Set<string>(),
+  notifications: new Set<string>(),
+};
+
+function stripKnownMissingColumns(table: string, payload: Record<string, any>): Record<string, any> {
+  const missingSet = knownMissingTableColumns[table];
+  if (!missingSet || missingSet.size === 0) return { ...payload };
+  const cleaned: Record<string, any> = {};
+  for (const [k, v] of Object.entries(payload)) {
+    if (!missingSet.has(k)) {
+      cleaned[k] = v;
+    }
+  }
+  return cleaned;
+}
+
+function recordMissingColumn(table: string, column: string) {
+  if (!knownMissingTableColumns[table]) {
+    knownMissingTableColumns[table] = new Set<string>();
+  }
+  knownMissingTableColumns[table].add(column);
+}
+
+function extractMissingColumnFromError(error: any): string | null {
+  if (!error) return null;
+  const msg = `${error.message || ''} ${error.details || ''}`;
+  const match = msg.match(/'([^']+)' column/) || msg.match(/column '([^']+)'/i) || msg.match(/column ([a-zA-Z0-9_]+) does not exist/i);
+  return match ? match[1] : null;
+}
 
 export const supabaseService = {
   /**
@@ -154,8 +193,9 @@ export const supabaseService = {
       roomAdmins: r.room_admins || [],
       roomAdminRights: r.room_admin_rights || {},
       pinnedMessageId: r.pinned_message_id,
-      deletionRequested: r.deletion_requested,
-      deletionReason: r.deletion_reason,
+      deletionRequested: Boolean(r.deletion_requested),
+      deletionReason: r.deletion_reason || undefined,
+      deletionRequestedBy: r.deletion_requested_by || undefined,
       topContributor: r.top_contributor,
     }));
   },
@@ -197,6 +237,9 @@ export const supabaseService = {
       creator_username: room.creatorUsername || null,
       room_admins: room.roomAdmins || [],
       room_admin_rights: room.roomAdminRights || {},
+      deletion_requested: room.deletionRequested || false,
+      deletion_reason: room.deletionReason || null,
+      deletion_requested_by: room.deletionRequestedBy || room.creatorUsername || null,
       top_contributor: room.topContributor || null,
     };
 
@@ -380,6 +423,170 @@ export const supabaseService = {
     } catch (err: any) {
       console.error('Error saving profile to Supabase:', err);
       return { success: false, error: err.message || 'Error writing registration to Supabase database.' };
+    }
+  },
+
+  /**
+   * Cascade update user profile and replace old username everywhere in DB
+   * (old messages, posts, comments, rooms, DMs, notifications)
+   */
+  async updateUserEverywhere(
+    oldUsername: string,
+    updatedProfile: UserProfile
+  ): Promise<{ success: boolean; error?: string }> {
+    const supabase = getSupabaseClient();
+    if (!supabase) return { success: false, error: 'Supabase is not connected' };
+
+    try {
+      const cleanOld = oldUsername.trim().toLowerCase().replace(/^@/, '');
+      const cleanNew = updatedProfile.username.trim().toLowerCase().replace(/^@/, '');
+      const newDisplayName = updatedProfile.displayName?.trim() || cleanNew;
+      const newBadge = updatedProfile.badge || '🎓 Campus Member';
+
+      // 1. Save / Update User Profile in users and profiles tables
+      await this.saveProfile(updatedProfile);
+
+      // If username hasn't changed and only display name changed, still update messages/posts
+      const isUsernameChanged = cleanOld !== cleanNew && cleanOld !== '';
+
+      // 2. Cascade update in 'messages' table
+      try {
+        if (isUsernameChanged) {
+          await supabase
+            .from('messages')
+            .update({
+              sender_username: cleanNew,
+              sender_name: `@${cleanNew}`,
+              sender_badge: newBadge,
+            })
+            .eq('sender_username', cleanOld);
+        } else {
+          await supabase
+            .from('messages')
+            .update({
+              sender_badge: newBadge,
+            })
+            .eq('sender_username', cleanNew);
+        }
+      } catch (e) {
+        console.warn('Could not cascade update messages table:', e);
+      }
+
+      // 3. Cascade update in 'feed_posts' table
+      try {
+        if (isUsernameChanged) {
+          await supabase
+            .from('feed_posts')
+            .update({
+              author_username: cleanNew,
+              author_display_name: newDisplayName,
+              author_badge: newBadge,
+            })
+            .eq('author_username', cleanOld);
+        } else {
+          await supabase
+            .from('feed_posts')
+            .update({
+              author_display_name: newDisplayName,
+              author_badge: newBadge,
+            })
+            .eq('author_username', cleanNew);
+        }
+      } catch (e) {
+        console.warn('Could not cascade update feed_posts table:', e);
+      }
+
+      // 4. Cascade update in 'feed_comments' table
+      try {
+        if (isUsernameChanged) {
+          await supabase
+            .from('feed_comments')
+            .update({
+              author_username: cleanNew,
+              author_display_name: newDisplayName,
+            })
+            .eq('author_username', cleanOld);
+        } else {
+          await supabase
+            .from('feed_comments')
+            .update({
+              author_display_name: newDisplayName,
+            })
+            .eq('author_username', cleanNew);
+        }
+      } catch (e) {
+        console.warn('Could not cascade update feed_comments table:', e);
+      }
+
+      // 5. Cascade update in 'rooms' table (creator_username & creator_name)
+      try {
+        if (isUsernameChanged) {
+          await supabase
+            .from('rooms')
+            .update({
+              creator_username: cleanNew,
+              creator_name: newDisplayName,
+            })
+            .eq('creator_username', cleanOld);
+        } else {
+          await supabase
+            .from('rooms')
+            .update({
+              creator_name: newDisplayName,
+            })
+            .eq('creator_username', cleanNew);
+        }
+      } catch (e) {
+        console.warn('Could not cascade update rooms creator:', e);
+      }
+
+      // 6. Cascade update in 'private_messages' table
+      try {
+        if (isUsernameChanged) {
+          await supabase
+            .from('private_messages')
+            .update({
+              sender_username: cleanNew,
+              sender_display_name: newDisplayName,
+            })
+            .eq('sender_username', cleanOld);
+
+          await supabase
+            .from('private_messages')
+            .update({
+              recipient_username: cleanNew,
+            })
+            .eq('recipient_username', cleanOld);
+        }
+      } catch (e) {
+        console.warn('Could not cascade update private_messages:', e);
+      }
+
+      // 7. Cascade update in 'notifications' table
+      try {
+        if (isUsernameChanged) {
+          await supabase
+            .from('notifications')
+            .update({
+              recipient_username: cleanNew,
+            })
+            .eq('recipient_username', cleanOld);
+
+          await supabase
+            .from('notifications')
+            .update({
+              from_username: cleanNew,
+            })
+            .eq('from_username', cleanOld);
+        }
+      } catch (e) {
+        console.warn('Could not cascade update notifications:', e);
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('Error cascading user update in Supabase:', err);
+      return { success: false, error: err?.message || 'Database error during cascade update' };
     }
   },
 
@@ -593,6 +800,10 @@ export const supabaseService = {
       if (updates.lastActivityAt !== undefined) payload.last_activity_at = updates.lastActivityAt;
       if (updates.roomAdmins !== undefined) payload.room_admins = updates.roomAdmins;
       if (updates.roomAdminRights !== undefined) payload.room_admin_rights = updates.roomAdminRights;
+      if (updates.deletionRequested !== undefined) payload.deletion_requested = updates.deletionRequested;
+      if (updates.deletionReason !== undefined) payload.deletion_reason = updates.deletionReason;
+      if (updates.deletionRequestedBy !== undefined) payload.deletion_requested_by = updates.deletionRequestedBy;
+      if (updates.hasActivePoll !== undefined) payload.has_active_poll = updates.hasActivePoll;
 
       let { error } = await supabase.from('rooms').update(payload).eq('id', roomId);
 
@@ -860,6 +1071,30 @@ export const supabaseService = {
       .eq('id', messageId);
 
     return !error;
+  },
+
+  /**
+   * Update poll votes/data on a message in Supabase
+   */
+  async updateMessagePoll(messageId: string, pollData: PollData): Promise<boolean> {
+    const supabase = getSupabaseClient();
+    if (!supabase) return false;
+
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .update({ poll_data: pollData })
+        .eq('id', messageId);
+
+      if (error) {
+        console.error('Error updating poll in Supabase:', error);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      console.error('Error updating poll:', e);
+      return false;
+    }
   },
 
   /**
@@ -1204,6 +1439,145 @@ export const supabaseService = {
     } catch (e) {
       return false;
     }
+  },
+
+  /**
+   * Fetch notifications for a user
+   */
+  async getNotifications(username: string): Promise<AppNotification[] | null> {
+    const supabase = getSupabaseClient();
+    if (!supabase || !username) return null;
+
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('recipient_username', username)
+        .order('timestamp', { ascending: false });
+
+      if (error || !data) return null;
+
+      return data.map((n) => ({
+        id: n.id,
+        recipientUsername: n.recipient_username,
+        title: n.title,
+        message: n.message,
+        type: n.type as AppNotification['type'],
+        linkRoomId: n.link_room_id,
+        roomId: n.room_id,
+        fromUsername: n.from_username,
+        timestamp: n.timestamp,
+        isRead: n.is_read,
+      }));
+    } catch (e) {
+      return null;
+    }
+  },
+
+  /**
+   * Save notification in Supabase
+   */
+  async saveNotification(notif: AppNotification): Promise<boolean> {
+    const supabase = getSupabaseClient();
+    if (!supabase) return false;
+
+    try {
+      const { error } = await supabase.from('notifications').insert({
+        id: notif.id,
+        recipient_username: notif.recipientUsername,
+        title: notif.title,
+        message: notif.message,
+        type: notif.type,
+        link_room_id: notif.linkRoomId || null,
+        room_id: notif.roomId || null,
+        from_username: notif.fromUsername || null,
+        timestamp: notif.timestamp,
+        is_read: notif.isRead || false,
+      });
+
+      return !error;
+    } catch (e) {
+      return false;
+    }
+  },
+
+  /**
+   * Mark all notifications as read for a user
+   */
+  async markNotificationsAsRead(username: string): Promise<boolean> {
+    const supabase = getSupabaseClient();
+    if (!supabase || !username) return false;
+
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('recipient_username', username);
+
+      return !error;
+    } catch (e) {
+      return false;
+    }
+  },
+
+  /**
+   * Delete a notification
+   */
+  async deleteNotification(notificationId: string): Promise<boolean> {
+    const supabase = getSupabaseClient();
+    if (!supabase) return false;
+
+    try {
+      const { error } = await supabase.from('notifications').delete().eq('id', notificationId);
+      return !error;
+    } catch (e) {
+      return false;
+    }
+  },
+
+  /**
+   * Realtime Subscription to Notifications for a user
+   */
+  subscribeToNotifications(
+    username: string,
+    onNotification: (notif: AppNotification) => void
+  ) {
+    const supabase = getSupabaseClient();
+    if (!supabase || !username) return () => {};
+
+    const channel = supabase
+      .channel(`user-notifs-${username}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `recipient_username=eq.${username}`,
+        },
+        (payload) => {
+          const n = payload.new;
+          if (n) {
+            onNotification({
+              id: n.id,
+              recipientUsername: n.recipient_username,
+              title: n.title,
+              message: n.message,
+              type: n.type as AppNotification['type'],
+              linkRoomId: n.link_room_id,
+              roomId: n.room_id,
+              fromUsername: n.from_username,
+              timestamp: n.timestamp,
+              isRead: n.is_read,
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   },
 
   /**

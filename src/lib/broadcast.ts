@@ -1,9 +1,9 @@
-import { ChatMessage, TrendingRoom, FeedPost } from '../types';
+import { ChatMessage, TrendingRoom, FeedPost, UserProfile, AppNotification, PollData } from '../types';
 
 export type BroadcastPayload =
   | { type: 'NEW_MESSAGE'; message: ChatMessage }
   | { type: 'DELETE_MESSAGE'; roomId: string; messageId: string }
-  | { type: 'POLL_VOTE'; roomId: string; messageId: string; optionId: string }
+  | { type: 'POLL_VOTE'; roomId: string; messageId: string; optionId: string; voterUsername?: string; pollData?: PollData }
   | { type: 'REACTION'; roomId: string; messageId: string; emoji: string }
   | { type: 'FLOATING_EMOJI'; roomId: string; emoji: string }
   | { type: 'NEW_ROOM'; room: TrendingRoom }
@@ -11,7 +11,9 @@ export type BroadcastPayload =
   | { type: 'DELETE_ROOM'; roomId: string }
   | { type: 'NEW_POST'; post: FeedPost }
   | { type: 'DELETE_POST'; postId: string }
-  | { type: 'PRESENCE_UPDATE'; roomId: string; delta: number };
+  | { type: 'PRESENCE_UPDATE'; roomId: string; delta: number }
+  | { type: 'USER_UPDATED'; oldUsername: string; newProfile: UserProfile }
+  | { type: 'NOTIFICATION'; notification: AppNotification };
 
 const CHANNEL_NAME = 'trending_rooms_live_channel';
 

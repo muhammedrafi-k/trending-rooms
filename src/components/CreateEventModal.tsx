@@ -45,7 +45,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
       ? `PRV-${Math.random().toString(36).substring(2, 8).toUpperCase()}`
       : undefined;
 
-    const creatorUser = currentUserUsername || 'student';
+    const creatorUser = currentUserUsername || '';
 
     const newRoom: TrendingRoom = {
       id: `room-${currentCollege.id}-${Date.now()}`,
@@ -61,28 +61,30 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       description:
         description.trim() ||
-        `Student discussion room for ${currentCollege.shortName}.`,
+        `Discussion room for ${currentCollege.shortName}.`,
       isLiveNow: true,
       isPrivate,
       inviteCode,
-      allowedUsers: [creatorUser],
-      activeMembers: [creatorUser],
-      roomLogs: [
-        {
-          id: `log-${Date.now()}`,
-          roomId: `room-${currentCollege.id}-${Date.now()}`,
-          username: creatorUser,
-          displayName: creatorName.trim() || `@${creatorUser}`,
-          action: 'created',
-          timestamp: nowIso,
-        },
-      ],
+      allowedUsers: creatorUser ? [creatorUser] : [],
+      activeMembers: creatorUser ? [creatorUser] : [],
+      roomLogs: creatorUser
+        ? [
+            {
+              id: `log-${Date.now()}`,
+              roomId: `room-${currentCollege.id}-${Date.now()}`,
+              username: creatorUser,
+              displayName: creatorName.trim() || `@${creatorUser}`,
+              action: 'created',
+              timestamp: nowIso,
+            },
+          ]
+        : [],
       hasActivePoll: false,
-      creatorName: creatorName.trim() || `@${creatorUser}`,
-      creatorUsername: creatorUser,
+      creatorName: creatorName.trim() || (creatorUser ? `@${creatorUser}` : 'Campus Member'),
+      creatorUsername: creatorUser || undefined,
       roomAdmins: [],
       topContributor: {
-        name: creatorName.trim() || `@${creatorUser}`,
+        name: creatorName.trim() || (creatorUser ? `@${creatorUser}` : 'Campus Member'),
         badge: '👑 Room Creator',
       },
     };
