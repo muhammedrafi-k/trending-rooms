@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Search, Flame, Radio, Filter, MapPin, Sparkles, Plus, BarChart2, School, Award, Lock, Key, X, Check } from 'lucide-react';
+import { Search, Radio, Plus, School, Lock, Key, X, Check, CheckCircle2, Globe } from 'lucide-react';
 import { TrendingRoom, CollegeInfo } from '../types';
 import { RoomCard } from './RoomCard';
 
@@ -24,7 +24,6 @@ export const RoomList: React.FC<RoomListProps> = ({
   unlockedPrivateRoomIds,
   onEnterRoom,
   onOpenCreateRoom,
-  onOpenCollegeSelector,
   onJoinPrivateRoomWithCode,
   latestMessages,
 }) => {
@@ -35,49 +34,50 @@ export const RoomList: React.FC<RoomListProps> = ({
   const [privateError, setPrivateError] = useState('');
   const [privateSuccess, setPrivateSuccess] = useState('');
 
+  const collegeRooms = useMemo(() => {
+    return rooms.filter((r) => r.collegeId === currentCollege.id || !r.collegeId);
+  }, [rooms, currentCollege]);
+
+  const joinedRoomsCount = useMemo(() => {
+    if (!currentUserUsername) return 0;
+    return collegeRooms.filter(
+      (r) =>
+        r.creatorUsername === currentUserUsername ||
+        (Array.isArray(r.activeMembers) && r.activeMembers.includes(currentUserUsername))
+    ).length;
+  }, [collegeRooms, currentUserUsername]);
+
   const filterTabs = [
-    { id: 'all', label: '🌐 All Campus Rooms', emoji: '🌐' },
-    { id: 'auto', label: '🔥 Auto Trending', emoji: '🔥' },
-    { id: 'student', label: '🎓 Student Created', emoji: '🎓' },
-    { id: 'private', label: '🔒 My Private Rooms', emoji: '🔒' },
-    { id: 'polls', label: '📊 Live Poll Rooms', emoji: '📊' },
+    { id: 'all', label: 'All Rooms', emoji: '🌐' },
+    { id: 'joined', label: `Joined Rooms (${joinedRoomsCount})`, emoji: '✅' },
+    { id: 'public', label: 'Public Rooms', emoji: '🌐' },
+    { id: 'private', label: 'Private Rooms', emoji: '🔒' },
+    { id: 'polls', label: 'Live Polls', emoji: '📊' },
     { id: 'fest', label: 'Fests & Events', emoji: '🎉' },
     { id: 'canteen', label: 'Canteen & Food', emoji: '🍛' },
     { id: 'exam', label: 'Exams & Academics', emoji: '📚' },
   ];
 
-  const collegeRooms = useMemo(() => {
-    // Filter rooms for current college (or all if custom)
-    return rooms.filter((r) => r.collegeId === currentCollege.id || !r.collegeId);
-  }, [rooms, currentCollege]);
-
   const filteredRooms = useMemo(() => {
     return collegeRooms.filter((room) => {
-      // Check if room is private
-      if (room.isPrivate) {
-        const isCreator = currentUserUsername && room.creatorUsername === currentUserUsername;
-        const isUnlocked = unlockedPrivateRoomIds.includes(room.id);
-        const hasAccess = isAdmin || isCreator || isUnlocked;
+      const isCreator = currentUserUsername && room.creatorUsername === currentUserUsername;
+      const isJoined =
+        isCreator ||
+        (Array.isArray(room.activeMembers) && room.activeMembers.includes(currentUserUsername || ''));
+      const isUnlocked = unlockedPrivateRoomIds.includes(room.id);
+      const hasAccess = isAdmin || isCreator || isUnlocked || isJoined;
 
-        if (selectedFilter === 'private') {
-          return hasAccess || room.isListedPublicly;
-        }
-
-        // In standard public tabs, show if publicly listed OR if user has unlocked/created it
-        if (!room.isListedPublicly && !hasAccess) return false;
-      } else {
-        if (selectedFilter === 'private') return false;
-      }
-
-      // Filter tab
-      if (selectedFilter === 'auto' && room.roomType !== 'auto_trending') return false;
-      if (selectedFilter === 'student' && room.roomType !== 'student_created') return false;
-      if (selectedFilter === 'polls' && !room.hasActivePoll) return false;
-      if (
-        ['fest', 'canteen', 'exam'].includes(selectedFilter) &&
-        room.category !== selectedFilter
-      ) {
-        return false;
+      // Filter tabs
+      if (selectedFilter === 'joined') {
+        if (!isJoined) return false;
+      } else if (selectedFilter === 'public') {
+        if (room.isPrivate) return false;
+      } else if (selectedFilter === 'private') {
+        if (!room.isPrivate) return false;
+      } else if (selectedFilter === 'polls') {
+        if (!room.hasActivePoll) return false;
+      } else if (['fest', 'canteen', 'exam'].includes(selectedFilter)) {
+        if (room.category !== selectedFilter) return false;
       }
 
       // Search query
@@ -96,8 +96,11 @@ export const RoomList: React.FC<RoomListProps> = ({
   const handleRoomCardClick = (room: TrendingRoom) => {
     if (room.isPrivate) {
       const isCreator = currentUserUsername && room.creatorUsername === currentUserUsername;
+      const isJoined =
+        isCreator ||
+        (Array.isArray(room.activeMembers) && room.activeMembers.includes(currentUserUsername || ''));
       const isUnlocked = unlockedPrivateRoomIds.includes(room.id);
-      const hasAccess = isAdmin || isCreator || isUnlocked;
+      const hasAccess = isAdmin || isCreator || isUnlocked || isJoined;
 
       if (!hasAccess) {
         setPrivateInput('');
@@ -119,20 +122,20 @@ export const RoomList: React.FC<RoomListProps> = ({
           <div className="flex flex-wrap items-center gap-2 mb-3">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-500/20 border border-orange-500/30 text-orange-300 text-xs font-extrabold">
               <Radio className="w-3.5 h-3.5 text-orange-400" />
-              <span>Live Room</span>
+              <span>Campus Rooms</span>
             </div>
 
             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs font-bold">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-              {filteredRooms.length} Live Room{filteredRooms.length === 1 ? '' : 's'} Active
+              {filteredRooms.length} Room{filteredRooms.length === 1 ? '' : 's'} Active
             </span>
           </div>
 
           <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-white mb-2">
-            Live Campus Rooms & Student Polls
+            Campus Live Rooms & Student Discussions
           </h2>
           <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-            Zero friction • No join approvals • Instant campus engagement. Talk about fests, exam updates, bus delays, canteen reviews, and vote in live polls.
+            Public rooms for campus discussions, private invite-only rooms, and real-time student polls. Join any room to chat live!
           </p>
         </div>
       </div>
@@ -147,7 +150,7 @@ export const RoomList: React.FC<RoomListProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search active rooms (e.g., Biryani, Fest, Exam)..."
+              placeholder="Search active rooms (e.g., Canteen, Fest, Exam, Placement)..."
               className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-xs font-medium text-slate-800 placeholder-slate-400 transition"
             />
           </div>
@@ -161,28 +164,46 @@ export const RoomList: React.FC<RoomListProps> = ({
                 setPrivateInput('');
                 setShowJoinPrivateModal(true);
               }}
-              className="flex-1 sm:flex-initial px-3.5 py-2.5 rounded-xl bg-purple-50 hover:bg-purple-100 border border-purple-300 text-purple-900 font-extrabold text-xs flex items-center justify-center gap-1.5 transition active:scale-95"
+              className="flex-1 sm:flex-initial px-3.5 py-2.5 rounded-xl bg-purple-50 hover:bg-purple-100 border border-purple-300 text-purple-900 font-extrabold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
               title="Join Private Room with Invite Code"
             >
               <Key className="w-4 h-4 text-purple-600" />
-              <span>Join Private Room</span>
+              <span>Join with Code</span>
             </button>
 
             <button
               onClick={onOpenCreateRoom}
-              className="flex-1 sm:flex-initial px-4 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition active:scale-95 shrink-0"
+              className="flex-1 sm:flex-initial px-4 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition active:scale-95 shrink-0 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Create Room</span>
             </button>
           </div>
         </div>
+
+        {/* Filter Pills */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+          {filterTabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setSelectedFilter(tab.id)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1.5 ${
+                selectedFilter === tab.id
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <span>{tab.emoji}</span>
+              <span>{tab.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Grid Title */}
       <div className="flex items-center justify-between">
         <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-          <span>{currentCollege.shortName} Live Rooms</span>
+          <span>{currentCollege.shortName} Rooms</span>
           <span className="text-xs font-bold bg-orange-100 text-orange-800 px-2 py-0.5 rounded-full">
             {filteredRooms.length}
           </span>
@@ -190,9 +211,9 @@ export const RoomList: React.FC<RoomListProps> = ({
 
         <button
           onClick={onOpenCreateRoom}
-          className="text-xs font-bold text-orange-600 hover:text-orange-700 underline flex items-center gap-1"
+          className="text-xs font-bold text-orange-600 hover:text-orange-700 underline flex items-center gap-1 cursor-pointer"
         >
-          <span>Start a new discussion or room</span>
+          <span>Start a new room</span>
         </button>
       </div>
 
@@ -201,8 +222,11 @@ export const RoomList: React.FC<RoomListProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredRooms.map((room) => {
             const isCreator = currentUserUsername && room.creatorUsername === currentUserUsername;
+            const isJoined =
+              isCreator ||
+              (Array.isArray(room.activeMembers) && room.activeMembers.includes(currentUserUsername || ''));
             const isUnlocked = unlockedPrivateRoomIds.includes(room.id);
-            const hasAccess = !room.isPrivate || isAdmin || isCreator || isUnlocked;
+            const hasAccess = !room.isPrivate || isAdmin || isCreator || isUnlocked || isJoined;
 
             return (
               <RoomCard
@@ -221,19 +245,24 @@ export const RoomList: React.FC<RoomListProps> = ({
             <School className="w-6 h-6" />
           </div>
           <h4 className="text-base font-bold text-slate-900">
-            No active rooms match this filter
+            {selectedFilter === 'joined'
+              ? "You haven't joined any rooms yet"
+              : 'No active rooms match this filter'}
           </h4>
           <p className="text-xs text-slate-500">
-            Be the first student to start a live discussion room or launch a poll for {currentCollege.shortName}!
+            {selectedFilter === 'joined'
+              ? 'Browse public rooms and click Join to participate in campus discussions!'
+              : `Be the first student to create a room for ${currentCollege.shortName}!`}
           </p>
           <button
             onClick={onOpenCreateRoom}
-            className="px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs shadow-sm transition"
+            className="px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs shadow-sm transition cursor-pointer"
           >
             🔥 Create Campus Room Now
           </button>
         </div>
       )}
+
       {/* Join Private Room Modal */}
       {showJoinPrivateModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
@@ -254,7 +283,7 @@ export const RoomList: React.FC<RoomListProps> = ({
               </div>
               <button
                 onClick={() => setShowJoinPrivateModal(false)}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -300,7 +329,7 @@ export const RoomList: React.FC<RoomListProps> = ({
                   />
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Private rooms are invite-only and protected by unique access keys.
+                  Private rooms require a secret invite code or link to enter.
                 </p>
               </div>
 
@@ -321,13 +350,13 @@ export const RoomList: React.FC<RoomListProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowJoinPrivateModal(false)}
-                  className="px-4 py-2 rounded-xl text-slate-600 font-medium text-xs hover:bg-slate-100"
+                  className="px-4 py-2 rounded-xl text-slate-600 font-medium text-xs hover:bg-slate-100 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-extrabold text-xs shadow-md transition flex items-center gap-1.5"
+                  className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-extrabold text-xs shadow-md transition flex items-center gap-1.5 cursor-pointer"
                 >
                   <Key className="w-4 h-4" />
                   <span>Unlock & Join Room</span>

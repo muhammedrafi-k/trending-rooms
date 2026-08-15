@@ -7,6 +7,7 @@ export type BroadcastPayload =
   | { type: 'REACTION'; roomId: string; messageId: string; emoji: string }
   | { type: 'FLOATING_EMOJI'; roomId: string; emoji: string }
   | { type: 'NEW_ROOM'; room: TrendingRoom }
+  | { type: 'ROOM_UPDATED'; room: TrendingRoom }
   | { type: 'DELETE_ROOM'; roomId: string }
   | { type: 'NEW_POST'; post: FeedPost }
   | { type: 'DELETE_POST'; postId: string }

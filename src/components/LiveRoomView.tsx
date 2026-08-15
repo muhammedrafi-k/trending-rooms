@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   ArrowLeft,
   Users,
@@ -13,7 +13,6 @@ import {
   X,
   Radio,
   BarChart2,
-  Award,
   Lock,
   Plus,
   CheckCircle2,
@@ -29,6 +28,7 @@ import {
   MoreVertical,
   LogOut,
   Globe,
+  Key,
 } from 'lucide-react';
 import {
   TrendingRoom,
@@ -117,11 +117,10 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
   const [showEditRoomModal, setShowEditRoomModal] = useState(false);
   const [editTitle, setEditTitle] = useState(room.title);
   const [editCategory, setEditCategory] = useState(room.category);
-  const [editEmoji, setEditEmoji] = useState(room.emoji);
-  const [editDescription, setEditDescription] = useState(room.description);
-  const [editLocationArea, setEditLocationArea] = useState(room.locationArea);
-  const [editIsPrivate, setEditIsPrivate] = useState(room.isPrivate || false);
-  const [editIsListedPublicly, setEditIsListedPublicly] = useState(room.isListedPublicly || false);
+  const [editEmoji, setEditEmoji] = useState(room.emoji || '💬');
+  const [editDescription, setEditDescription] = useState(room.description || '');
+  const [editLocationArea, setEditLocationArea] = useState(room.locationArea || '');
+  const [editIsPrivate, setEditIsPrivate] = useState(Boolean(room.isPrivate));
 
   // Admin rights configuration modal state
   const [configuringRightsUser, setConfiguringRightsUser] = useState<string | null>(null);
@@ -136,45 +135,19 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
   const chatEndRef = useRef<HTMLDivElement>(null);
   const expiry = getRoomExpirationText(room.lastActivityAt);
 
-  // Only currently joined and stayed members for active member list
-  const activeMembersList = Array.isArray(room.activeMembers) && room.activeMembers.length > 0
-    ? room.activeMembers
-    : Array.from(
-        new Set([
-          currentUser.username,
-          ...(room.creatorUsername ? [room.creatorUsername] : []),
-          ...(room.roomAdmins || []),
-          ...messages
-            .filter((m) => m.senderUsername && !m.isAnonymous)
-            .map((m) => m.senderUsername as string),
-        ])
-      ).filter(Boolean);
-
-  const isUserJoined = Array.isArray(room.activeMembers) && room.activeMembers.length > 0
-    ? room.activeMembers.includes(currentUser.username)
-    : Boolean(
-        currentUser.username &&
-        (room.creatorUsername === currentUser.username ||
-          (Array.isArray(room.allowedUsers) && room.allowedUsers.includes(currentUser.username)))
-      );
-
-  const roomLogs: RoomLog[] = Array.isArray(room.roomLogs) && room.roomLogs.length > 0
-    ? room.roomLogs
-    : [
-        {
-          id: 'log-creator',
-          roomId: room.id,
-          username: room.creatorUsername || 'creator',
-          displayName: room.creatorUsername ? `@${room.creatorUsername}` : 'Room Creator',
-          action: 'created',
-          timestamp: room.createdAt || new Date().toISOString(),
-        },
-      ];
-
-  const isCreatorOrUniversalAdmin =
-    currentUser.isAdmin ||
+  // Identity checks
+  const isCreator = Boolean(
     (room.creatorUsername && currentUser.username === room.creatorUsername) ||
-    (!room.creatorUsername && room.roomType === 'student_created');
+    (!room.creatorUsername && room.roomType === 'student_created' && currentUser.displayName === room.creatorName)
+  );
+
+  const isUserJoined =
+    isCreator ||
+    (Array.isArray(room.activeMembers) && room.activeMembers.includes(currentUser.username)) ||
+    (Array.isArray(room.allowedUsers) && room.allowedUsers.includes(currentUser.username));
+
+  const isPromotedAdmin = Boolean(room.roomAdmins?.includes(currentUser.username));
+  const isRoomAdmin = currentUser.isAdmin || isCreator || isPromotedAdmin;
 
   const userAdminRights = room.roomAdminRights?.[currentUser.username] || {
     canDeleteMessages: true,
@@ -184,21 +157,54 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
     canEditRoom: true,
   };
 
-  const isPromotedAdmin = room.roomAdmins?.includes(currentUser.username) || false;
+  const canUserDeleteMessages = isCreator || currentUser.isAdmin || (isPromotedAdmin && userAdminRights.canDeleteMessages);
+  const canUserPinMessages = isCreator || currentUser.isAdmin || (isPromotedAdmin && userAdminRights.canPinMessages);
+  const canUserEditRoom = isCreator || currentUser.isAdmin || (isPromotedAdmin && (userAdminRights.canEditRoom ?? true));
 
-  const canUserDeleteMessages =
-    isCreatorOrUniversalAdmin || (isPromotedAdmin && userAdminRights.canDeleteMessages);
+  // Active member list - ensure owner is always included and prioritized at the top
+  const activeMembersList = useMemo(() => {
+    const raw = Array.isArray(room.activeMembers) && room.activeMembers.length > 0
+      ? room.activeMembers
+      : Array.from(
+          new Set([
+            ...(room.creatorUsername ? [room.creatorUsername] : []),
+            ...(room.roomAdmins || []),
+            ...messages
+              .filter((m) => m.senderUsername && !m.isAnonymous)
+              .map((m) => m.senderUsername as string),
+          ])
+        ).filter(Boolean);
 
-  const canUserPinMessages =
-    isCreatorOrUniversalAdmin || (isPromotedAdmin && userAdminRights.canPinMessages);
+    const list = Array.from(
+      new Set([
+        ...(room.creatorUsername ? [room.creatorUsername] : []),
+        ...raw,
+      ])
+    ).filter(Boolean);
 
-  const canUserManagePolls =
-    isCreatorOrUniversalAdmin || (isPromotedAdmin && userAdminRights.canManagePolls);
+    return list.sort((a, b) => {
+      if (a === room.creatorUsername) return -1;
+      if (b === room.creatorUsername) return 1;
+      const aIsAdmin = room.roomAdmins?.includes(a);
+      const bIsAdmin = room.roomAdmins?.includes(b);
+      if (aIsAdmin && !bIsAdmin) return -1;
+      if (!aIsAdmin && bIsAdmin) return 1;
+      return a.localeCompare(b);
+    });
+  }, [room.activeMembers, room.creatorUsername, room.roomAdmins, messages]);
 
-  const canUserEditRoom =
-    isCreatorOrUniversalAdmin || (isPromotedAdmin && (userAdminRights.canEditRoom ?? true));
-
-  const isRoomAdmin = isCreatorOrUniversalAdmin || isPromotedAdmin;
+  const roomLogs: RoomLog[] = Array.isArray(room.roomLogs) && room.roomLogs.length > 0
+    ? room.roomLogs
+    : [
+        {
+          id: 'log-creator',
+          roomId: room.id,
+          username: room.creatorUsername || 'student',
+          displayName: room.creatorName || `@${room.creatorUsername || 'student'}`,
+          action: 'created',
+          timestamp: room.createdAt || new Date().toISOString(),
+        },
+      ];
 
   const samplePhotos = [
     'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=800&q=80',
@@ -209,6 +215,19 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
+
+  const handleOpenEditModal = () => {
+    const rawTitle = room.title || '';
+    // Strip leading emoji if duplicate
+    const cleanTitle = rawTitle.replace(/^(\p{Emoji}|\uD83C[\uDF00-\uDFFF]|\uD83D[\uDC00-\uDE4F]|\uD83E[\uDD00-\uDDFF])\s*/u, '').trim();
+    setEditTitle(cleanTitle || rawTitle);
+    setEditEmoji(room.emoji || '💬');
+    setEditCategory(room.category || 'general');
+    setEditDescription(room.description || '');
+    setEditLocationArea(room.locationArea || '');
+    setEditIsPrivate(Boolean(room.isPrivate));
+    setShowEditRoomModal(true);
+  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -234,6 +253,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isUserJoined) return;
     if (!inputText.trim() && !selectedImage) return;
 
     // Detect mentioned usernames
@@ -312,7 +332,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
           <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
             <button
               onClick={onBack}
-              className="p-1.5 sm:p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition shrink-0"
+              className="p-1.5 sm:p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition shrink-0 cursor-pointer"
               title="Back to campus rooms"
             >
               <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -324,22 +344,32 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                 <h2 className="text-sm sm:text-lg font-extrabold text-white tracking-tight truncate">
                   {room.title}
                 </h2>
-                {/* Public vs Private Room Badge */}
+                
+                {/* Privacy Badge */}
                 {room.isPrivate ? (
                   <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 flex items-center gap-1">
                     <Lock className="w-3 h-3 text-purple-300" />
-                    <span>Private Room</span>
+                    <span>Private</span>
                   </span>
                 ) : (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                    🌐 Public
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                    <Globe className="w-3 h-3 text-emerald-300" />
+                    <span>Public</span>
                   </span>
                 )}
 
-                {/* Room Admin Badge */}
-                {isRoomAdmin && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 flex items-center gap-1">
+                {/* Creator Badge */}
+                {isCreator && (
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
                     <Crown className="w-3 h-3 text-amber-400" />
+                    <span>Owner / Creator</span>
+                  </span>
+                )}
+
+                {/* Admin Badge (for non-creator promoted admins) */}
+                {!isCreator && isPromotedAdmin && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 flex items-center gap-1">
+                    <Shield className="w-3 h-3 text-purple-400" />
                     <span>Room Admin</span>
                   </span>
                 )}
@@ -352,30 +382,47 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
 
           {/* Quick Join/Leave & 3-Dot Options Dropdown */}
           <div className="flex items-center gap-1.5 shrink-0">
-            {isUserJoined ? (
+            {/* Quick Edit Room Button for Creator/Admin */}
+            {canUserEditRoom && (
               <button
-                onClick={() => onLeaveRoom?.(room.id)}
-                className="hidden sm:inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-red-950/60 text-slate-300 hover:text-red-400 text-xs font-bold border border-slate-700 transition"
-                title="Leave room"
+                type="button"
+                onClick={handleOpenEditModal}
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold transition cursor-pointer"
+                title="Edit Room Details"
               >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Leave Room</span>
-              </button>
-            ) : (
-              <button
-                onClick={() => onJoinRoom?.(room.id)}
-                className="hidden sm:inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow transition"
-                title="Join room"
-              >
-                <Users className="w-3.5 h-3.5" />
-                <span>Join Room</span>
+                <Settings className="w-3.5 h-3.5 text-amber-400" />
+                <span>Edit Room</span>
               </button>
             )}
 
+            {/* Creator has no Join/Leave option. Non-creators toggle Join vs Leave */}
+            {!isCreator && (
+              isUserJoined ? (
+                <button
+                  onClick={() => onLeaveRoom?.(room.id)}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-red-950/60 text-slate-300 hover:text-red-400 text-xs font-bold border border-slate-700 transition cursor-pointer"
+                  title="Leave room"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Leave</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => onJoinRoom?.(room.id)}
+                  className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md transition active:scale-95 cursor-pointer"
+                  title="Join room"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Join</span>
+                </button>
+              )
+            )}
+
+            {/* 3-Dot Menu */}
             <div className="relative shrink-0">
               <button
                 onClick={() => setShowMoreMenu(!showMoreMenu)}
-                className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 transition border border-slate-700 flex items-center justify-center"
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 transition border border-slate-700 flex items-center justify-center cursor-pointer"
                 title="More Room Options"
               >
                 <MoreVertical className="w-4 h-4 text-slate-200" />
@@ -388,28 +435,44 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                     onClick={() => setShowMoreMenu(false)}
                   />
                   <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl py-1.5 z-50 text-xs font-semibold text-slate-200 space-y-0.5 animate-in fade-in zoom-in-95 duration-150">
-                    {/* Join / Leave Room Option */}
-                    {isUserJoined ? (
+                    {/* Join / Leave Room Option (Only for non-creators) */}
+                    {!isCreator && (
+                      isUserJoined ? (
+                        <button
+                          onClick={() => {
+                            setShowMoreMenu(false);
+                            onLeaveRoom?.(room.id);
+                          }}
+                          className="w-full px-3.5 py-2.5 hover:bg-red-950/60 text-left flex items-center gap-2 text-red-400 transition cursor-pointer"
+                        >
+                          <LogOut className="w-4 h-4 text-red-400 shrink-0" />
+                          <span>Leave Room</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setShowMoreMenu(false);
+                            onJoinRoom?.(room.id);
+                          }}
+                          className="w-full px-3.5 py-2.5 hover:bg-emerald-950/60 text-left flex items-center gap-2 text-emerald-400 transition cursor-pointer"
+                        >
+                          <Users className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <span>Join Room</span>
+                        </button>
+                      )
+                    )}
+
+                    {/* Edit Room Details Option */}
+                    {canUserEditRoom && (
                       <button
                         onClick={() => {
                           setShowMoreMenu(false);
-                          onLeaveRoom?.(room.id);
+                          handleOpenEditModal();
                         }}
-                        className="w-full px-3.5 py-2.5 hover:bg-red-950/60 text-left flex items-center gap-2 text-red-400 transition"
+                        className="w-full px-3.5 py-2.5 hover:bg-slate-800 text-left flex items-center gap-2 text-amber-300 transition cursor-pointer"
                       >
-                        <LogOut className="w-4 h-4 text-red-400 shrink-0" />
-                        <span>Leave Room</span>
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => {
-                          setShowMoreMenu(false);
-                          onJoinRoom?.(room.id);
-                        }}
-                        className="w-full px-3.5 py-2.5 hover:bg-emerald-950/60 text-left flex items-center gap-2 text-emerald-400 transition"
-                      >
-                        <Users className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span>Join Room</span>
+                        <Settings className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>Edit Room Details</span>
                       </button>
                     )}
 
@@ -419,7 +482,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                         setShowMoreMenu(false);
                         setShowMembersModal(true);
                       }}
-                      className="w-full px-3.5 py-2.5 hover:bg-slate-800 text-left flex items-center gap-2 text-emerald-400 transition"
+                      className="w-full px-3.5 py-2.5 hover:bg-slate-800 text-left flex items-center gap-2 text-emerald-400 transition cursor-pointer"
                     >
                       <Users className="w-4 h-4 text-emerald-400 shrink-0" />
                       <span>Active Members ({activeMembersList.length})</span>
@@ -431,7 +494,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                         setShowMoreMenu(false);
                         setShowRoomLogsModal(true);
                       }}
-                      className="w-full px-3.5 py-2.5 hover:bg-slate-800 text-left flex items-center gap-2 text-blue-300 transition"
+                      className="w-full px-3.5 py-2.5 hover:bg-slate-800 text-left flex items-center gap-2 text-blue-300 transition cursor-pointer"
                     >
                       <Clock className="w-4 h-4 text-blue-400 shrink-0" />
                       <span>📜 Room Activity Log</span>
@@ -443,7 +506,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                         setShowMoreMenu(false);
                         setShowShareModal(true);
                       }}
-                      className="w-full px-3.5 py-2.5 hover:bg-slate-800 text-left flex items-center gap-2 text-slate-200 transition"
+                      className="w-full px-3.5 py-2.5 hover:bg-slate-800 text-left flex items-center gap-2 text-slate-200 transition cursor-pointer"
                     >
                       <Share2 className="w-4 h-4 text-orange-400 shrink-0" />
                       <span>Share Room Link</span>
@@ -455,31 +518,11 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                         setShowMoreMenu(false);
                         onReportItem('room', room.id, room.title);
                       }}
-                      className="w-full px-3.5 py-2.5 hover:bg-slate-800 text-left flex items-center gap-2 text-red-400 transition"
+                      className="w-full px-3.5 py-2.5 hover:bg-slate-800 text-left flex items-center gap-2 text-red-400 transition cursor-pointer"
                     >
                       <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
                       <span>Report Room</span>
                     </button>
-
-                    {/* Edit Room Details Option (For Room Admins) */}
-                    {isRoomAdmin && (
-                      <button
-                        onClick={() => {
-                          setShowMoreMenu(false);
-                          setEditTitle(room.title);
-                          setEditCategory(room.category);
-                          setEditEmoji(room.emoji);
-                          setEditDescription(room.description);
-                          setEditLocationArea(room.locationArea);
-                          setEditIsPrivate(room.isPrivate || false);
-                          setShowEditRoomModal(true);
-                        }}
-                        className="w-full px-3.5 py-2.5 hover:bg-slate-800 text-left flex items-center gap-2 text-amber-300 transition border-t border-slate-800"
-                      >
-                        <Settings className="w-4 h-4 text-amber-400 shrink-0" />
-                        <span>Edit Room Details</span>
-                      </button>
-                    )}
 
                     {/* Request Room Deletion Option (For Room Admin) */}
                     {isRoomAdmin && (
@@ -488,7 +531,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                           setShowMoreMenu(false);
                           setShowDeletionModal(true);
                         }}
-                        className="w-full px-3.5 py-2.5 hover:bg-red-950/60 hover:text-red-300 text-left flex items-center gap-2 text-red-400 transition border-t border-slate-800"
+                        className="w-full px-3.5 py-2.5 hover:bg-red-950/60 hover:text-red-300 text-left flex items-center gap-2 text-red-400 transition border-t border-slate-800 cursor-pointer"
                       >
                         <Trash2 className="w-4 h-4 text-red-400 shrink-0" />
                         <span>Request Room Deletion</span>
@@ -501,623 +544,814 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
           </div>
         </div>
 
-        {/* Deletion Request Status Banner */}
-        {room.deletionRequested && (
-          <div className="bg-amber-950/80 border border-amber-500/50 rounded-xl px-3.5 py-2 flex items-center justify-between text-xs text-amber-200">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>
-                <strong>Room Deletion Pending Approval:</strong> Requested by room creator. Developer/Admin system reviewing request.
-              </span>
-            </div>
-          </div>
-        )}
+        {/* Room Info Bar */}
+        <div className="flex items-center justify-between text-[11px] text-slate-400 flex-wrap gap-2 pt-1 border-t border-slate-800/60">
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1 text-slate-300 font-medium">
+              <MapPin className="w-3 h-3 text-orange-400" />
+              <span>{room.locationArea}</span>
+            </span>
 
-        {/* Live People Counter + Location + Auto-Delete Expiry */}
-        <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2 pt-1.5 border-t border-slate-800/80 text-xs">
-          <div className="flex items-center gap-1.5 sm:gap-2 bg-emerald-950/80 border border-emerald-500/30 px-2.5 sm:px-3 py-1 rounded-xl font-bold text-emerald-300">
-            <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-400 animate-pulse shrink-0" />
-            <span className="hidden sm:inline">👥 {activeMembersList.length} members in room</span>
-            <span className="sm:hidden font-extrabold text-xs">{activeMembersList.length}</span>
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0"></span>
+            <button
+              onClick={() => setShowMembersModal(true)}
+              className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-emerald-950/40 border border-emerald-800/40 text-emerald-400 hover:text-emerald-300 hover:border-emerald-700/60 font-semibold transition cursor-pointer"
+            >
+              <Users className="w-3 h-3 text-emerald-400" />
+              <span>{activeMembersList.length} Members</span>
+            </button>
           </div>
 
-          <div className="flex items-center gap-1.5 bg-slate-800/90 border border-slate-700/80 px-3 py-1 rounded-xl text-slate-200 font-semibold">
-            <MapPin className="w-3.5 h-3.5 text-amber-400" />
-            <span>📍 {room.locationArea}</span>
-          </div>
-
-          <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1">
-            <Clock className="w-3.5 h-3.5 text-slate-500" />
-            <span>⏳ {expiry.label}</span>
+          <div className="flex items-center gap-3">
+            <span className="text-slate-500 font-mono">{expiry.label}</span>
           </div>
         </div>
       </div>
 
-      {/* PINNED ANNOUNCEMENT BANNER */}
-      {(() => {
-        const pinnedMsg = messages.find((m) => m.id === room.pinnedMessageId);
-        if (!pinnedMsg) return null;
-        return (
-          <div className="bg-amber-950/90 border-b border-amber-500/40 px-4 py-2.5 flex items-center justify-between text-amber-200 text-xs backdrop-blur-md sticky top-[73px] z-20">
-            <div className="flex items-center gap-2 overflow-hidden flex-1 mr-2">
-              <Pin className="w-4 h-4 text-amber-400 shrink-0 fill-amber-400/20" />
-              <div className="truncate">
-                <span className="font-extrabold text-amber-300 mr-1">
-                  Pinned Message by {pinnedMsg.senderName}:
-                </span>
-                <span className="italic opacity-90">{pinnedMsg.content || 'Poll/Media Attachment'}</span>
-              </div>
+      {/* MESSAGES LIST */}
+      <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 sm:space-y-4">
+        {/* Creator / Pinned Message Banner if exists */}
+        {room.pinnedMessageId && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3 flex items-center justify-between gap-2 text-xs text-amber-200">
+            <div className="flex items-center gap-2 min-w-0">
+              <Pin className="w-4 h-4 text-amber-400 shrink-0" />
+              <span className="font-bold text-amber-300 shrink-0">Pinned:</span>
+              <span className="truncate">
+                {messages.find((m) => m.id === room.pinnedMessageId)?.content || 'Pinned notice'}
+              </span>
             </div>
             {canUserPinMessages && (
               <button
                 onClick={() => onPinMessage?.(room.id, null)}
-                className="p-1 px-2.5 bg-amber-800/80 hover:bg-amber-800 text-amber-200 border border-amber-600/50 rounded-lg font-extrabold text-[10px] shrink-0 transition"
-                title="Unpin Message"
+                className="text-[10px] text-amber-400 hover:underline shrink-0 font-bold"
               >
                 Unpin
               </button>
             )}
           </div>
-        );
-      })()}
+        )}
 
-      {/* CHAT FEED & LIVE POLLS CONTAINER */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 bg-slate-950/60">
-        {/* Intro Room Banner */}
-        <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-4 text-center max-w-xl mx-auto space-y-2">
-          <div className="w-10 h-10 rounded-full bg-orange-500/10 text-orange-400 flex items-center justify-center mx-auto">
-            <Radio className="w-5 h-5 animate-pulse" />
+        {messages.length === 0 && (
+          <div className="text-center py-12 text-slate-500 space-y-2">
+            <div className="text-3xl">💬</div>
+            <p className="text-xs font-semibold text-slate-400">
+              No messages in this room yet.
+            </p>
+            <p className="text-[11px] text-slate-500">
+              {isUserJoined
+                ? 'Say hello and start the campus conversation!'
+                : 'Click Join Room below to send the first message.'}
+            </p>
           </div>
-          <p className="text-xs text-slate-300">
-            Welcome to <span className="font-bold text-white">{room.title}</span>.
-            Type <strong className="text-orange-400 font-mono">@username</strong> to mention students. Click any username to private chat.
-          </p>
-          <div className="flex justify-center gap-2 text-[11px] font-semibold text-purple-300 pt-1">
-            <button
-              onClick={() => setShowMembersModal(true)}
-              className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/30 hover:bg-emerald-500/30 text-emerald-300 transition"
-            >
-              <Users className="w-3.5 h-3.5" />
-              <span>👥 See All Room Members</span>
-            </button>
-            <button
-              onClick={onOpenCreatePoll}
-              className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-purple-500/20 border border-purple-500/30 hover:bg-purple-500/30 transition"
-            >
-              <BarChart2 className="w-3.5 h-3.5" />
-              <span>📊 Launch Campus Poll</span>
-            </button>
-          </div>
-        </div>
+        )}
 
-        {/* Chat Messages and Embedded Polls */}
         {messages.map((msg) => {
-          const senderUsernameToUse =
-            msg.senderUsername ||
-            (msg.senderName.startsWith('@') ? msg.senderName.slice(1) : undefined);
+          const isMe = msg.senderUsername === currentUser.username;
+          const isMsgCreator = room.creatorUsername === msg.senderUsername;
+          const isPinned = room.pinnedMessageId === msg.id;
 
           return (
             <div
               key={msg.id}
-              className="flex gap-3 items-start group max-w-2xl mx-auto w-full"
+              className={`flex gap-2.5 sm:gap-3 group ${isMe ? 'flex-row-reverse' : ''}`}
             >
               {/* Avatar */}
-              <button
-                type="button"
-                disabled={msg.isAnonymous || !senderUsernameToUse}
+              <div
                 onClick={() => {
-                  if (senderUsernameToUse) {
-                    if (onSelectUser) {
-                      onSelectUser(senderUsernameToUse);
-                    } else {
-                      onOpenPrivateChat?.(senderUsernameToUse);
-                    }
+                  if (!msg.isAnonymous && msg.senderUsername && onSelectUser) {
+                    onSelectUser(msg.senderUsername);
                   }
                 }}
-                className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold shrink-0 border ${
+                className={`w-8 h-8 sm:w-9 sm:h-9 rounded-2xl flex items-center justify-center text-xs font-black shrink-0 ${
                   msg.isAnonymous
-                    ? 'bg-purple-950 text-purple-300 border-purple-700/60 cursor-default'
-                    : 'bg-slate-800 hover:bg-orange-600 text-slate-200 hover:text-white border-slate-700 transition cursor-pointer active:scale-95'
+                    ? 'bg-purple-950 text-purple-400 border border-purple-700/50'
+                    : isMe
+                    ? 'bg-orange-600 text-white shadow-md cursor-pointer'
+                    : 'bg-slate-800 text-orange-400 border border-slate-700 cursor-pointer hover:border-orange-500'
                 }`}
-                title={senderUsernameToUse ? `Click to view profile / chat with @${senderUsernameToUse}` : undefined}
+                title={msg.isAnonymous ? 'Anonymous Member' : `View @${msg.senderUsername}`}
               >
-                {msg.isAnonymous ? '🕵️' : msg.senderName.slice(0, 2).toUpperCase()}
-              </button>
+                {msg.isAnonymous ? '🕵️' : (msg.senderName?.charAt(0) || 'U')}
+              </div>
 
-              <div className="flex-1 bg-slate-900/90 rounded-2xl p-3.5 border border-slate-800 shadow-md hover:border-slate-700 transition relative">
-                {/* Sender Line */}
-                <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    {!msg.isAnonymous && senderUsernameToUse ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (onSelectUser) {
-                            onSelectUser(senderUsernameToUse);
-                          } else {
-                            onOpenPrivateChat?.(senderUsernameToUse);
-                          }
-                        }}
-                        className="font-bold text-xs text-orange-400 hover:text-orange-300 hover:underline transition text-left"
-                        title={`Click to view profile for @${senderUsernameToUse}`}
-                      >
-                        {msg.senderName}
-                      </button>
-                    ) : (
-                      <span className="font-bold text-xs text-slate-200">
-                        {msg.senderName}
+              {/* Message Content Bubble */}
+              <div
+                className={`max-w-[82%] sm:max-w-[75%] rounded-2xl p-3.5 relative shadow-sm ${
+                  isMe
+                    ? 'bg-orange-600/90 text-white rounded-tr-none border border-orange-500/40'
+                    : 'bg-slate-800/90 text-slate-100 rounded-tl-none border border-slate-700/80'
+                }`}
+              >
+                {/* Header info */}
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span
+                      onClick={() => {
+                        if (!msg.isAnonymous && msg.senderUsername && onSelectUser) {
+                          onSelectUser(msg.senderUsername);
+                        }
+                      }}
+                      className={`text-xs font-black ${
+                        isMe ? 'text-white' : 'text-orange-400 hover:underline cursor-pointer'
+                      }`}
+                    >
+                      {msg.senderName}
+                    </span>
+
+                    {isMsgCreator && (
+                      <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-200 border border-amber-500/40 flex items-center gap-0.5">
+                        <Crown className="w-2.5 h-2.5 text-amber-400" /> Host
                       </span>
                     )}
 
                     {msg.senderBadge && (
-                      <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      <span className="text-[9px] font-semibold opacity-75">
                         {msg.senderBadge}
                       </span>
                     )}
+                  </div>
 
-                  {msg.isAnonymous && (
-                    <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center gap-1">
-                      <Lock className="w-2.5 h-2.5" />
-                      Anonymous
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] opacity-60 font-mono">
+                      {formatRelativeTime(msg.timestamp)}
                     </span>
-                  )}
 
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-800 text-slate-400 border border-slate-700">
-                    {msg.witnessDistanceText}
-                  </span>
-                </div>
-
-                {/* Right controls: Timestamp & 3-dot Action Menu (Pin, Report, Delete, DM) */}
-                <div className="flex items-center gap-1.5 relative">
-                  <span className="text-[10px] text-slate-500 font-mono">
-                    {formatRelativeTime(msg.timestamp)}
-                  </span>
-
-                  {room.pinnedMessageId === msg.id && (
-                    <span className="flex items-center gap-0.5 text-[10px] font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
-                      <Pin className="w-2.5 h-2.5" />
-                      <span>Pinned</span>
-                    </span>
-                  )}
-
-                  {/* 3-Dot Message Action Dropdown Button */}
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setActiveMessageMenuId((prev) => (prev === msg.id ? null : msg.id));
-                      }}
-                      className={`p-1 rounded-lg transition ${
-                        activeMessageMenuId === msg.id
-                          ? 'bg-slate-700 text-white'
-                          : 'text-slate-500 hover:text-slate-200 hover:bg-slate-800 opacity-70 group-hover:opacity-100'
-                      }`}
-                      title="Message options"
-                    >
-                      <MoreVertical className="w-3.5 h-3.5" />
-                    </button>
-
-                    {/* 3-Dot Floating Context Menu */}
-                    {activeMessageMenuId === msg.id && (
-                      <div
-                        className="absolute right-0 top-6 z-30 bg-slate-900 border border-slate-700 shadow-2xl rounded-2xl p-1.5 min-w-[170px] space-y-1 animate-in fade-in zoom-in-95 duration-150"
-                        onClick={(e) => e.stopPropagation()}
+                    {/* Action button */}
+                    <div className="relative">
+                      <button
+                        onClick={() =>
+                          setActiveMessageMenuId(
+                            activeMessageMenuId === msg.id ? null : msg.id
+                          )
+                        }
+                        className="opacity-0 group-hover:opacity-100 transition p-1 hover:bg-black/20 rounded text-slate-400 hover:text-white cursor-pointer"
                       >
-                        {/* 1. View User Details / Profile */}
-                        {senderUsernameToUse && !msg.isAnonymous && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (onSelectUser) {
-                                onSelectUser(senderUsernameToUse);
-                              } else {
-                                onOpenPrivateChat?.(senderUsernameToUse);
-                              }
-                              setActiveMessageMenuId(null);
-                            }}
-                            className="w-full px-2.5 py-1.5 rounded-xl text-left text-xs font-semibold text-slate-200 hover:bg-slate-800 hover:text-orange-400 flex items-center gap-2 transition"
-                          >
-                            <Users className="w-3.5 h-3.5 text-orange-400" />
-                            <span>View Profile</span>
-                          </button>
-                        )}
+                        <MoreVertical className="w-3.5 h-3.5" />
+                      </button>
 
-                        {/* 2. Pin / Unpin Action */}
-                        {canUserPinMessages && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              onPinMessage?.(
-                                room.id,
-                                room.pinnedMessageId === msg.id ? null : msg.id
-                              );
-                              setActiveMessageMenuId(null);
-                            }}
-                            className="w-full px-2.5 py-1.5 rounded-xl text-left text-xs font-semibold text-slate-200 hover:bg-slate-800 hover:text-amber-300 flex items-center gap-2 transition"
-                          >
-                            <Pin className="w-3.5 h-3.5 text-amber-400" />
-                            <span>
-                              {room.pinnedMessageId === msg.id ? 'Unpin Message' : 'Pin Message'}
-                            </span>
-                          </button>
-                        )}
+                      {activeMessageMenuId === msg.id && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-40"
+                            onClick={() => setActiveMessageMenuId(null)}
+                          />
+                          <div className="absolute right-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-xl py-1 z-50 text-xs w-40">
+                            {!msg.isAnonymous && msg.senderUsername && (
+                              <button
+                                onClick={() => {
+                                  setActiveMessageMenuId(null);
+                                  onSelectUser?.(msg.senderUsername!);
+                                }}
+                                className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-slate-200 flex items-center gap-1.5"
+                              >
+                                <span>👤 View Profile</span>
+                              </button>
+                            )}
 
-                        {/* 3. Direct Private Chat (if other registered user) */}
-                        {senderUsernameToUse &&
-                          senderUsernameToUse.toLowerCase() !== currentUser.username.toLowerCase() &&
-                          !msg.isAnonymous && (
+                            {!isMe && !msg.isAnonymous && msg.senderUsername && onOpenPrivateChat && (
+                              <button
+                                onClick={() => {
+                                  setActiveMessageMenuId(null);
+                                  onOpenPrivateChat(msg.senderUsername!);
+                                }}
+                                className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-orange-400 flex items-center gap-1.5"
+                              >
+                                <span>💬 Direct Message</span>
+                              </button>
+                            )}
+
+                            {canUserPinMessages && (
+                              <button
+                                onClick={() => {
+                                  setActiveMessageMenuId(null);
+                                  onPinMessage?.(room.id, isPinned ? null : msg.id);
+                                }}
+                                className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-amber-300 flex items-center gap-1.5"
+                              >
+                                <Pin className="w-3.5 h-3.5" />
+                                <span>{isPinned ? 'Unpin' : 'Pin to Top'}</span>
+                              </button>
+                            )}
+
+                            {(isMe || canUserDeleteMessages) && (
+                              <button
+                                onClick={() => {
+                                  setActiveMessageMenuId(null);
+                                  onDeleteMessage(msg.id);
+                                }}
+                                className="w-full px-3 py-1.5 text-left hover:bg-red-950/60 text-red-400 flex items-center gap-1.5"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Delete Message</span>
+                              </button>
+                            )}
+
                             <button
-                              type="button"
                               onClick={() => {
-                                onOpenPrivateChat?.(senderUsernameToUse);
                                 setActiveMessageMenuId(null);
+                                onReportItem('message', msg.id, msg.content);
                               }}
-                              className="w-full px-2.5 py-1.5 rounded-xl text-left text-xs font-semibold text-slate-200 hover:bg-slate-800 hover:text-orange-400 flex items-center gap-2 transition"
+                              className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-slate-400 hover:text-red-400 flex items-center gap-1.5"
                             >
-                              <AtSign className="w-3.5 h-3.5 text-orange-400" />
-                              <span>Chat @{senderUsernameToUse}</span>
-                            </button>
-                          )}
-
-                        {/* 4. Report Message */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onReportItem('message', msg.id, msg.content || 'Poll message');
-                            setActiveMessageMenuId(null);
-                          }}
-                          className="w-full px-2.5 py-1.5 rounded-xl text-left text-xs font-semibold text-slate-200 hover:bg-slate-800 hover:text-amber-400 flex items-center gap-2 transition"
-                        >
-                          <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                          <span>Report Message</span>
-                        </button>
-
-                        {/* 5. Delete Message (Sender, Room Admin, or Platform Admin) */}
-                        {(canUserDeleteMessages ||
-                          (senderUsernameToUse &&
-                            senderUsernameToUse.toLowerCase() === currentUser.username.toLowerCase()) ||
-                          msg.senderName === currentUser.displayName ||
-                          currentUser.isAdmin) && (
-                          <div className="pt-1 border-t border-slate-800">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                onDeleteMessage(msg.id);
-                                setActiveMessageMenuId(null);
-                              }}
-                              className="w-full px-2.5 py-1.5 rounded-xl text-left text-xs font-bold text-red-400 hover:bg-red-500/10 flex items-center gap-2 transition"
-                            >
-                              <Trash2 className="w-3.5 h-3.5 text-red-400" />
-                              <span>Delete Message</span>
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                              <span>Report</span>
                             </button>
                           </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Message Content with Mention Highlighting */}
-              {msg.content && (
-                <div className="text-xs sm:text-sm text-slate-200">
-                  {renderMessageContent(msg.content)}
-                </div>
-              )}
-
-              {/* EMBEDDED INTERACTIVE POLL */}
-              {msg.poll && (
-                <div className="mt-3 bg-purple-950/40 border border-purple-500/30 rounded-2xl p-3.5 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-purple-200 flex items-center gap-1.5">
-                      <BarChart2 className="w-4 h-4 text-purple-400" />
-                      <span>{msg.poll.question}</span>
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-mono text-purple-300/80">
-                        {msg.poll.totalVotes} votes
-                      </span>
-                      {canUserManagePolls && (
-                        <button
-                          onClick={() => onDeletePoll(msg.id)}
-                          className="p-1 text-slate-400 hover:text-red-400 transition"
-                          title="Admin: Remove Poll"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
+                        </>
                       )}
                     </div>
                   </div>
+                </div>
 
-                  <div className="space-y-2 pt-1">
-                    {msg.poll.options.map((opt) => {
-                      const total = msg.poll!.totalVotes || 1;
-                      const pct = Math.round((opt.votes / total) * 100);
-                      const isUserVoted = votedOptionIds[msg.id] === opt.id;
+                {/* Message Body */}
+                <div className="text-xs sm:text-sm whitespace-pre-wrap break-words">
+                  {renderMessageContent(msg.content)}
+                </div>
 
-                      return (
-                        <button
-                          key={opt.id}
-                          onClick={() => handleVote(msg.id, opt.id)}
-                          className={`w-full text-left p-2.5 rounded-xl border transition relative overflow-hidden flex items-center justify-between ${
-                            isUserVoted
-                              ? 'bg-purple-900/60 border-purple-400 text-white font-bold'
-                              : 'bg-slate-900/90 hover:bg-slate-800 border-slate-700 text-slate-200'
-                          }`}
-                        >
-                          <div
-                            style={{ width: `${pct}%` }}
-                            className="absolute left-0 top-0 bottom-0 bg-purple-500/20 transition-all duration-300"
-                          ></div>
-
-                          <span className="relative z-10 text-xs font-semibold flex items-center gap-2">
-                            {isUserVoted && <CheckCircle2 className="w-3.5 h-3.5 text-purple-400 shrink-0" />}
-                            <span>{opt.text}</span>
-                          </span>
-
-                          <span className="relative z-10 text-xs font-bold text-purple-300 shrink-0">
-                            {opt.votes} ({pct}%)
-                          </span>
-                        </button>
-                      );
-                    })}
+                {/* Media Image */}
+                {msg.mediaUrl && (
+                  <div className="mt-2.5 rounded-xl overflow-hidden border border-slate-700/60 max-h-60 bg-black">
+                    <img
+                      src={msg.mediaUrl}
+                      alt="Witness attachment"
+                      onClick={() => setLightboxImage(msg.mediaUrl!)}
+                      className="w-full h-full object-cover cursor-pointer hover:scale-102 transition duration-200"
+                    />
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Media Attachment */}
-              {msg.mediaUrl && (
-                <div className="mt-2.5 rounded-xl overflow-hidden border border-slate-800 max-h-64 bg-black">
-                  <img
-                    src={msg.mediaUrl}
-                    alt="Campus witness photo"
-                    onClick={() => setLightboxImage(msg.mediaUrl!)}
-                    className="w-full h-full object-cover cursor-pointer hover:scale-102 transition duration-200"
-                  />
-                </div>
-              )}
-
-              {/* Reaction Chips */}
-              <div className="mt-3 flex items-center gap-1.5 flex-wrap">
-                {Object.entries(msg.reactions).map(([emoji, count]) => {
-                  const num = Number(count) || 0;
-                  return num > 0 ? (
-                    <button
-                      key={emoji}
-                      onClick={() => onAddReactionToMessage(msg.id, emoji)}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-slate-300 transition active:scale-90"
-                    >
-                      <span>{emoji}</span>
-                      <span className="font-semibold text-[11px] text-slate-400">
-                        {num}
+                {/* Poll Card */}
+                {msg.poll && (
+                  <div className="mt-3 p-3 bg-slate-950/80 rounded-xl border border-slate-700/80 space-y-2.5">
+                    <div className="flex items-center justify-between text-xs font-bold text-purple-300">
+                      <div className="flex items-center gap-1.5">
+                        <BarChart2 className="w-4 h-4 text-purple-400" />
+                        <span>{msg.poll.question}</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400">
+                        {msg.poll.totalVotes} votes
                       </span>
-                    </button>
-                  ) : null;
-                })}
+                    </div>
 
-                <button
-                  onClick={() => onAddReactionToMessage(msg.id, '🔥')}
-                  className="opacity-0 group-hover:opacity-100 transition px-2 py-0.5 rounded-lg bg-slate-800/80 text-[11px] text-slate-400 hover:text-white"
-                >
-                  +🔥
-                </button>
+                    <div className="space-y-1.5">
+                      {msg.poll.options.map((opt) => {
+                        const total = msg.poll!.totalVotes || 0;
+                        const pct = total > 0 ? Math.round((opt.votes / total) * 100) : 0;
+                        const isVoted =
+                          votedOptionIds[msg.id] === opt.id ||
+                          opt.voters?.includes(currentUser.username);
+
+                        return (
+                          <button
+                            key={opt.id}
+                            disabled={!isUserJoined}
+                            onClick={() => handleVote(msg.id, opt.id)}
+                            className={`w-full text-left p-2 rounded-xl text-xs relative overflow-hidden border transition flex items-center justify-between cursor-pointer ${
+                              isVoted
+                                ? 'bg-purple-900/60 border-purple-500 text-white font-bold'
+                                : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'
+                            }`}
+                          >
+                            <div
+                              style={{ width: `${pct}%` }}
+                              className="absolute left-0 top-0 bottom-0 bg-purple-500/20 transition-all duration-300"
+                            />
+                            <span className="relative z-10 flex items-center gap-1.5 truncate">
+                              {isVoted && <CheckCircle2 className="w-3.5 h-3.5 text-purple-400 shrink-0" />}
+                              <span>{opt.text}</span>
+                            </span>
+                            <span className="relative z-10 text-[10px] font-mono text-purple-300 shrink-0">
+                              {opt.votes} ({pct}%)
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Reaction Chips */}
+                <div className="mt-2.5 flex items-center gap-1 flex-wrap">
+                  {Object.entries(msg.reactions || {}).map(([emoji, count]) => {
+                    const num = Number(count) || 0;
+                    return num > 0 ? (
+                      <button
+                        key={emoji}
+                        onClick={() => onAddReactionToMessage(msg.id, emoji)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-900/80 hover:bg-slate-700 border border-slate-700 text-xs text-slate-300 transition active:scale-90 cursor-pointer"
+                      >
+                        <span>{emoji}</span>
+                        <span className="font-semibold text-[10px] text-slate-400">{num}</span>
+                      </button>
+                    ) : null;
+                  })}
+
+                  <button
+                    onClick={() => onAddReactionToMessage(msg.id, '🔥')}
+                    className="opacity-0 group-hover:opacity-100 transition px-2 py-0.5 rounded-lg bg-slate-900/80 text-[11px] text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    +🔥
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
 
         <div ref={chatEndRef} />
       </div>
 
-      {/* MESSAGE INPUT COMPOSER & MENTIONS POPUP */}
-      <form
-        onSubmit={handleSend}
-        className="bg-slate-900 border-t border-slate-800 p-3 sm:p-4 relative space-y-2"
-      >
-        {/* Mentions Autosuggest Dropdown */}
-        {showMentionMenu && filteredMentionUsers.length > 0 && (
-          <div className="absolute bottom-full mb-2 left-4 z-50 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-w-xs w-full p-1 animate-in fade-in">
-            <div className="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-700/60 mb-1 flex items-center gap-1">
-              <AtSign className="w-3 h-3 text-orange-400" />
-              <span>Mention Student User</span>
+      {/* BOTTOM ACTION AREA: COMPOSER IF JOINED / JOIN PROMPT IF NOT JOINED */}
+      {isUserJoined ? (
+        <form
+          onSubmit={handleSend}
+          className="bg-slate-900 border-t border-slate-800 p-3 sm:p-4 relative space-y-2 shrink-0"
+        >
+          {/* Mentions Autosuggest Dropdown */}
+          {showMentionMenu && filteredMentionUsers.length > 0 && (
+            <div className="absolute bottom-full mb-2 left-4 z-50 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-w-xs w-full p-1 animate-in fade-in">
+              <div className="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-700/60 mb-1 flex items-center gap-1">
+                <AtSign className="w-3 h-3 text-orange-400" />
+                <span>Mention Room Member</span>
+              </div>
+              {filteredMentionUsers.map((username) => (
+                <button
+                  key={username}
+                  type="button"
+                  onClick={() => handleSelectMention(username)}
+                  className="w-full text-left px-3 py-2 text-xs font-bold text-slate-200 hover:bg-orange-600 hover:text-white rounded-lg transition flex items-center justify-between cursor-pointer"
+                >
+                  <span>@{username}</span>
+                  <span className="text-[10px] opacity-70">Member</span>
+                </button>
+              ))}
             </div>
-            {filteredMentionUsers.map((username) => (
-              <button
-                key={username}
-                type="button"
-                onClick={() => handleSelectMention(username)}
-                className="w-full text-left px-3 py-2 text-xs font-bold text-slate-200 hover:bg-orange-600 hover:text-white rounded-lg transition flex items-center justify-between"
-              >
-                <span>@{username}</span>
-                <span className="text-[10px] opacity-70">Room Member</span>
-              </button>
-            ))}
-          </div>
-        )}
+          )}
 
-        {/* Selected Image Preview */}
-        {selectedImage && (
-          <div className="mb-2 relative inline-block">
-            <img
-              src={selectedImage}
-              alt="Preview"
-              className="w-16 h-16 object-cover rounded-lg border border-slate-700"
-            />
+          {/* Selected Image Preview */}
+          {selectedImage && (
+            <div className="mb-2 relative inline-block">
+              <img
+                src={selectedImage}
+                alt="Preview"
+                className="w-16 h-16 object-cover rounded-lg border border-slate-700"
+              />
+              <button
+                type="button"
+                onClick={() => setSelectedImage(null)}
+                className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-0.5 hover:bg-red-600 cursor-pointer"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+
+          {/* Image Picker Panel */}
+          {showImagePicker && (
+            <div className="mb-3 p-3 bg-slate-800 rounded-2xl border border-slate-700 space-y-2">
+              <div className="flex items-center justify-between text-xs text-slate-300 font-semibold">
+                <span>📸 Attach Campus Photo</span>
+                <button
+                  type="button"
+                  onClick={() => setShowImagePicker(false)}
+                  className="text-slate-400 hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <label className="flex-1 flex flex-col items-center justify-center p-3 border border-dashed border-slate-600 rounded-xl cursor-pointer hover:bg-slate-700/50 transition">
+                  <Camera className="w-5 h-5 text-orange-400 mb-1" />
+                  <span className="text-[11px] text-slate-300 font-medium">Upload File</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </label>
+
+                {samplePhotos.map((url, i) => (
+                  <img
+                    key={i}
+                    src={url}
+                    alt={`Sample ${i}`}
+                    onClick={() => {
+                      setSelectedImage(url);
+                      setShowImagePicker(false);
+                    }}
+                    className="w-14 h-14 object-cover rounded-xl cursor-pointer border border-slate-700 hover:border-orange-500 transition"
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Anonymous Mode & Poll Bar */}
+          <div className="flex items-center justify-between text-xs px-1">
+            <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-300 hover:text-white transition">
+              <input
+                type="checkbox"
+                checked={isAnonymousMode}
+                onChange={(e) => setIsAnonymousMode(e.target.checked)}
+                className="w-4 h-4 accent-purple-600 rounded cursor-pointer"
+              />
+              <span className="flex items-center gap-1">
+                <span>🕵️ Post Anonymously</span>
+                {isAnonymousMode && (
+                  <span className="text-[10px] text-purple-400 font-mono">
+                    (Masked as 🕵️ Anon Student)
+                  </span>
+                )}
+              </span>
+            </label>
+
             <button
               type="button"
-              onClick={() => setSelectedImage(null)}
-              className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-0.5 hover:bg-red-600"
+              onClick={onOpenCreatePoll}
+              className="text-purple-400 hover:text-purple-300 font-bold inline-flex items-center gap-1 transition cursor-pointer"
             >
-              <X className="w-3 h-3" />
+              <BarChart2 className="w-3.5 h-3.5" />
+              <span>+ Create Poll</span>
             </button>
           </div>
-        )}
 
-        {/* Image Picker Panel */}
-        {showImagePicker && (
-          <div className="mb-3 p-3 bg-slate-800 rounded-2xl border border-slate-700 space-y-2">
-            <div className="flex items-center justify-between text-xs text-slate-300 font-semibold">
-              <span>📸 Attach Campus Photo Witness Media</span>
+          {/* Inputs */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowImagePicker(!showImagePicker)}
+              className={`p-2.5 rounded-xl border transition cursor-pointer ${
+                selectedImage || showImagePicker
+                  ? 'bg-orange-500/20 text-orange-400 border-orange-500/40'
+                  : 'bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-700'
+              }`}
+              title="Attach Photo"
+            >
+              <ImageIcon className="w-5 h-5" />
+            </button>
+
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                value={inputText}
+                onChange={handleInputChange}
+                placeholder={
+                  isAnonymousMode
+                    ? 'Posting anonymously (🕵️ Secret Student)...'
+                    : `Chat live (type @ for mention)...`
+                }
+                className={`w-full text-slate-100 placeholder-slate-500 px-4 py-3 rounded-xl border focus:outline-none text-xs sm:text-sm ${
+                  isAnonymousMode
+                    ? 'bg-purple-950/50 border-purple-700 focus:border-purple-400'
+                    : 'bg-slate-950 border-slate-800 focus:border-orange-500'
+                }`}
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={!inputText.trim() && !selectedImage}
+              className={`p-3 rounded-xl font-semibold transition active:scale-95 shadow-md shrink-0 text-white disabled:opacity-40 cursor-pointer ${
+                isAnonymousMode
+                  ? 'bg-purple-600 hover:bg-purple-700'
+                  : 'bg-orange-600 hover:bg-orange-700'
+              }`}
+            >
+              <Send className="w-5 h-5" />
+            </button>
+          </div>
+        </form>
+      ) : (
+        /* NOT JOINED BANNER: Requires Join to Message */
+        <div className="bg-slate-900 border-t border-slate-800 p-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold shrink-0">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-extrabold text-white">
+                Join this room to send messages & participate
+              </h4>
+              <p className="text-[11px] text-slate-400">
+                Join to chat with campus students, share photos, and vote in live polls.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onJoinRoom?.(room.id)}
+            className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-md transition active:scale-95 flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+          >
+            <Users className="w-4 h-4" />
+            <span>Join Room</span>
+          </button>
+        </div>
+      )}
+
+      {/* Edit Room Details Modal */}
+      {showEditRoomModal && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowEditRoomModal(false);
+          }}
+        >
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 text-slate-100 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Settings className="w-5 h-5 text-amber-400" />
+                <h3 className="font-extrabold text-base text-white">Edit Room Details</h3>
+              </div>
               <button
-                type="button"
-                onClick={() => setShowImagePicker(false)}
-                className="text-slate-400 hover:text-white"
+                onClick={() => setShowEditRoomModal(false)}
+                className="p-1 rounded-xl bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="flex gap-2">
-              <label className="flex-1 flex flex-col items-center justify-center p-3 border border-dashed border-slate-600 rounded-xl cursor-pointer hover:bg-slate-700/50 transition">
-                <Camera className="w-5 h-5 text-orange-400 mb-1" />
-                <span className="text-[11px] text-slate-300 font-medium">Upload File</span>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!editTitle.trim()) return;
+                if (onUpdateRoom) {
+                  const updatedTitle = editEmoji.trim()
+                    ? `${editEmoji.trim()} ${editTitle.trim()}`
+                    : editTitle.trim();
+
+                  const payload: Partial<TrendingRoom> = {
+                    title: updatedTitle,
+                    emoji: editEmoji.trim() || '💬',
+                    category: editCategory,
+                    description: editDescription.trim(),
+                    locationArea: editLocationArea.trim(),
+                    isPrivate: editIsPrivate,
+                  };
+                  if (editIsPrivate && !room.inviteCode) {
+                    payload.inviteCode = `PRV-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+                  }
+                  onUpdateRoom(room.id, payload);
+                }
+                setShowEditRoomModal(false);
+              }}
+              className="space-y-4"
+            >
+              {/* Emoji & Title */}
+              <div className="grid grid-cols-4 gap-2">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Emoji</label>
+                  <input
+                    type="text"
+                    value={editEmoji}
+                    onChange={(e) => setEditEmoji(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-center text-lg focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div className="col-span-3">
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Room Title</label>
+                  <input
+                    type="text"
+                    required
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              {/* Public vs Private Room Switch */}
+              <div className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  Privacy Setting
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditIsPrivate(false)}
+                    className={`p-2.5 rounded-xl border text-left transition flex items-center gap-2 cursor-pointer ${
+                      !editIsPrivate
+                        ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200 font-bold'
+                        : 'bg-slate-900 border-slate-800 text-slate-400'
+                    }`}
+                  >
+                    <Globe className="w-4 h-4 text-emerald-400" />
+                    <div>
+                      <div className="text-xs font-bold text-white">Public</div>
+                      <div className="text-[9px] opacity-75">All campus students</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setEditIsPrivate(true)}
+                    className={`p-2.5 rounded-xl border text-left transition flex items-center gap-2 cursor-pointer ${
+                      editIsPrivate
+                        ? 'bg-purple-950/80 border-purple-500 text-purple-200 font-bold'
+                        : 'bg-slate-900 border-slate-800 text-slate-400'
+                    }`}
+                  >
+                    <Lock className="w-4 h-4 text-purple-400" />
+                    <div>
+                      <div className="text-xs font-bold text-white">Private</div>
+                      <div className="text-[9px] opacity-75">Code/link only</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Category */}
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">Room Category</label>
+                <select
+                  value={editCategory}
+                  onChange={(e) => setEditCategory(e.target.value as any)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-slate-200 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="canteen">🍛 Canteen & Food</option>
+                  <option value="fest">🎉 Fest & Cultural</option>
+                  <option value="exam">📚 Exam & Academics</option>
+                  <option value="bus">🚍 Bus & Travel</option>
+                  <option value="placement">💼 Placement & Jobs</option>
+                  <option value="complaint">🚰 Campus Issues</option>
+                  <option value="sports">🏆 Sports & Games</option>
+                  <option value="general">💬 General Discussion</option>
+                </select>
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">Description</label>
+                <textarea
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  rows={2}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:border-amber-500 resize-none"
+                />
+              </div>
+
+              {/* Location Area */}
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1">Location / Area</label>
                 <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileUpload}
-                  className="hidden"
+                  type="text"
+                  value={editLocationArea}
+                  onChange={(e) => setEditLocationArea(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-slate-200 focus:outline-none focus:border-amber-500"
                 />
-              </label>
+              </div>
 
-              {samplePhotos.map((url, i) => (
-                <img
-                  key={i}
-                  src={url}
-                  alt={`Sample ${i}`}
-                  onClick={() => {
-                    setSelectedImage(url);
-                    setShowImagePicker(false);
-                  }}
-                  className="w-14 h-14 object-cover rounded-xl cursor-pointer border border-slate-700 hover:border-orange-500 transition"
-                />
-              ))}
-            </div>
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowEditRoomModal(false)}
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-xl shadow-lg transition cursor-pointer"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
           </div>
-        )}
-
-        {/* Anonymous Mode & Poll Bar */}
-        <div className="flex items-center justify-between text-xs px-1">
-          <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-300 hover:text-white transition">
-            <input
-              type="checkbox"
-              checked={isAnonymousMode}
-              onChange={(e) => setIsAnonymousMode(e.target.checked)}
-              className="w-4 h-4 accent-purple-600 rounded cursor-pointer"
-            />
-            <span className="flex items-center gap-1">
-              <span>🕵️ Post Anonymously</span>
-              {isAnonymousMode && (
-                <span className="text-[10px] text-purple-400 font-mono">
-                  (Masked as 🕵️ Anon Student)
-                </span>
-              )}
-            </span>
-          </label>
-
-          <button
-            type="button"
-            onClick={onOpenCreatePoll}
-            className="text-purple-400 hover:text-purple-300 font-bold inline-flex items-center gap-1 transition"
-          >
-            <BarChart2 className="w-3.5 h-3.5" />
-            <span>+ Create Poll</span>
-          </button>
         </div>
+      )}
 
-        {/* Inputs */}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowImagePicker(!showImagePicker)}
-            className={`p-2.5 rounded-xl border transition ${
-              selectedImage || showImagePicker
-                ? 'bg-orange-500/20 text-orange-400 border-orange-500/40'
-                : 'bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-700'
-            }`}
-            title="Attach Photo"
-          >
-            <ImageIcon className="w-5 h-5" />
-          </button>
-
-          <div className="flex-1 relative">
-            <input
-              type="text"
-              value={inputText}
-              onChange={handleInputChange}
-              placeholder={
-                isAnonymousMode
-                  ? 'Posting anonymously (🕵️ Secret Student)...'
-                  : `Chat live (type @ for mention)...`
-              }
-              className={`w-full text-slate-100 placeholder-slate-500 px-4 py-3 rounded-xl border focus:outline-none text-xs sm:text-sm ${
-                isAnonymousMode
-                  ? 'bg-purple-950/50 border-purple-700 focus:border-purple-400'
-                  : 'bg-slate-950 border-slate-800 focus:border-orange-500'
-              }`}
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={!inputText.trim() && !selectedImage}
-            className={`p-3 rounded-xl font-semibold transition active:scale-95 shadow-md shrink-0 text-white disabled:opacity-40 ${
-              isAnonymousMode
-                ? 'bg-purple-600 hover:bg-purple-700'
-                : 'bg-orange-600 hover:bg-orange-700'
-            }`}
-          >
-            <Send className="w-4 h-4" />
-          </button>
-        </div>
-      </form>
-
-      {/* Room Deletion Request Modal */}
-      {showDeletionModal && (
+      {/* Share Room Join Link Modal */}
+      {showShareModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center gap-2 text-red-400 font-bold text-base">
-              <Trash2 className="w-5 h-5" />
-              <span>Request Room Deletion</span>
-            </div>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              As Room Admin, you can request room deletion. This sends a deletion request to the Developer/Admin control platform for approval.
-            </p>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1">
-                Reason for Deletion
-              </label>
-              <textarea
-                rows={2}
-                value={deletionReasonInput}
-                onChange={(e) => setDeletionReasonInput(e.target.value)}
-                placeholder="e.g., College fest finished, discussion resolved."
-                className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white outline-none focus:border-red-500"
-              />
-            </div>
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+          <div className="bg-slate-900 border border-slate-700 text-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-10 h-10 rounded-2xl bg-orange-500/10 border border-orange-500/20 text-orange-400 flex items-center justify-center font-bold">
+                  <Share2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm text-white">Share Room Join Link</h3>
+                  <p className="text-[11px] text-slate-400">Invite students to join live</p>
+                </div>
+              </div>
               <button
-                type="button"
-                onClick={() => setShowDeletionModal(false)}
-                className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white"
+                onClick={() => {
+                  setShowShareModal(false);
+                  setCopiedLink(false);
+                }}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
               >
-                Cancel
+                <X className="w-5 h-5" />
               </button>
+            </div>
+
+            {/* Room Type Notice */}
+            {room.isPrivate ? (
+              <div className="bg-purple-950/80 border border-purple-500/50 rounded-2xl p-3.5 space-y-2 text-purple-200">
+                <div className="flex items-center gap-2 font-bold text-xs text-purple-300">
+                  <Lock className="w-4 h-4 text-purple-400" />
+                  <span>🔒 Private Room</span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-purple-200/90">
+                  This is a private room. Only students with this exact invite link or code can join.
+                </p>
+                {room.inviteCode && (
+                  <div className="flex items-center justify-between bg-purple-900/60 p-2 rounded-xl border border-purple-700">
+                    <span className="text-[10px] text-purple-300 font-medium">Invite Code:</span>
+                    <span className="text-xs font-mono font-black text-amber-300 tracking-wider">
+                      {room.inviteCode}
+                    </span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="bg-emerald-950/80 border border-emerald-500/50 rounded-2xl p-3.5 space-y-1 text-emerald-200">
+                <div className="flex items-center gap-2 font-bold text-xs text-emerald-300">
+                  <span>🌐 Public Room</span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-emerald-200/90">
+                  This room is public. Anyone on campus can view and participate.
+                </p>
+              </div>
+            )}
+
+            {/* Link Input & Copy */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-400 mb-1.5">
+                Direct Room Link
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={
+                    room.isPrivate && room.inviteCode
+                      ? `${window.location.origin}${window.location.pathname}?room=${room.id}&invite=${room.inviteCode}`
+                      : `${window.location.origin}${window.location.pathname}?room=${room.id}`
+                  }
+                  className="flex-1 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-300 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const link = room.isPrivate && room.inviteCode
+                      ? `${window.location.origin}${window.location.pathname}?room=${room.id}&invite=${room.inviteCode}`
+                      : `${window.location.origin}${window.location.pathname}?room=${room.id}`;
+                    if (navigator.clipboard) {
+                      navigator.clipboard.writeText(link);
+                      setCopiedLink(true);
+                      setTimeout(() => setCopiedLink(false), 2500);
+                    }
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs flex items-center gap-1.5 transition shrink-0 active:scale-95 cursor-pointer"
+                >
+                  {copiedLink ? (
+                    <>
+                      <Check className="w-4 h-4 text-emerald-300" />
+                      <span>Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Share2 className="w-4 h-4" />
+                      <span>Copy Link</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <div className="pt-2 text-center">
               <button
                 type="button"
                 onClick={() => {
-                  onRequestRoomDeletion(
-                    room.id,
-                    deletionReasonInput.trim() || 'Room Creator requested deletion.'
-                  );
-                  setShowDeletionModal(false);
+                  setShowShareModal(false);
+                  setCopiedLink(false);
                 }}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl"
+                className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold cursor-pointer"
               >
-                Submit Request
+                Done
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Lightbox Modal */}
+      {lightboxImage && (
+        <div
+          onClick={() => setLightboxImage(null)}
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div className="relative max-w-4xl max-h-[90vh]">
+            <img
+              src={lightboxImage}
+              alt="Full view"
+              className="max-w-full max-h-[85vh] object-contain rounded-2xl"
+            />
+            <p className="text-center text-xs text-slate-400 mt-2">
+              Tap anywhere to close
+            </p>
           </div>
         </div>
       )}
@@ -1125,7 +1359,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
       {/* Room Members List Modal */}
       {showMembersModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 text-slate-100 shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 text-slate-100 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Users className="w-5 h-5 text-emerald-400" />
@@ -1135,25 +1369,25 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
               </div>
               <button
                 onClick={() => setShowMembersModal(false)}
-                className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white"
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <p className="text-xs text-slate-400">
-              Click on any member's avatar or <strong className="text-orange-400">@username</strong> to view their campus profile or message privately.
-            </p>
-
             <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
               {activeMembersList.map((username) => {
-                const isCreator = room.creatorUsername === username;
-                const isPromotedAdmin = room.roomAdmins?.includes(username);
+                const isMemberCreator = room.creatorUsername === username;
+                const isMemberAdmin = room.roomAdmins?.includes(username);
 
                 return (
                   <div
                     key={username}
-                    className="p-3 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-between hover:border-orange-500/50 transition"
+                    className={`p-3 rounded-2xl flex items-center justify-between transition border ${
+                      isMemberCreator
+                        ? 'bg-amber-950/20 border-amber-500/40 hover:border-amber-400'
+                        : 'bg-slate-950 border-slate-800 hover:border-orange-500/50'
+                    }`}
                   >
                     <div
                       onClick={() => {
@@ -1162,89 +1396,45 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                       }}
                       className="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0"
                     >
-                      <div className="w-8 h-8 rounded-xl bg-orange-500/20 text-orange-400 font-bold flex items-center justify-center text-xs border border-orange-500/30 shrink-0 hover:scale-105 transition">
+                      <div className={`w-8 h-8 rounded-xl font-bold flex items-center justify-center text-xs border shrink-0 hover:scale-105 transition ${
+                        isMemberCreator
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                          : 'bg-orange-500/20 text-orange-400 border-orange-500/30'
+                      }`}>
                         {username.slice(0, 2).toUpperCase()}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="font-bold text-xs text-white flex items-center gap-1.5 flex-wrap">
                           <span className="hover:text-orange-400 transition truncate">@{username}</span>
-                          {isCreator && (
-                            <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-[9px] font-black flex items-center gap-0.5 shrink-0">
-                              <Crown className="w-3 h-3 text-amber-400" /> Creator
+                          {isMemberCreator && (
+                            <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-[9px] font-black flex items-center gap-1 shrink-0 shadow-sm">
+                              <Crown className="w-3 h-3 text-amber-400" /> Room Owner
                             </span>
                           )}
-                          {!isCreator && isPromotedAdmin && (
-                            <span className="px-1.5 py-0.2 bg-purple-500/20 text-purple-300 border border-purple-500/40 rounded text-[9px] font-black flex items-center gap-0.5 shrink-0">
+                          {!isMemberCreator && isMemberAdmin && (
+                            <span className="px-1.5 py-0.5 bg-purple-500/20 text-purple-300 border border-purple-500/40 rounded text-[9px] font-black flex items-center gap-1 shrink-0">
                               <Shield className="w-3 h-3 text-purple-400" /> Admin
                             </span>
                           )}
                         </div>
                         <div className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                          Active in Room
+                          {isMemberCreator ? 'Owner & Member' : isMemberAdmin ? 'Admin & Member' : 'Member'}
                         </div>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                      {/* View Profile Action */}
                       <button
                         type="button"
                         onClick={() => {
                           if (onSelectUser) onSelectUser(username);
                           else onOpenPrivateChat?.(username);
                         }}
-                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold text-xs rounded-xl border border-slate-700 transition"
-                        title="View Profile"
+                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold text-xs rounded-xl border border-slate-700 transition cursor-pointer"
                       >
                         Profile
                       </button>
-
-                      {/* Room Creator / Universal Admin Controls */}
-                      {isRoomAdmin && !isCreator && username !== currentUser.username && (
-                        !isPromotedAdmin ? (
-                          <button
-                            onClick={() => {
-                              setConfiguringRightsUser(username);
-                              setEditingRights({
-                                canDeleteMessages: true,
-                                canPinMessages: true,
-                                canManagePolls: true,
-                              });
-                            }}
-                            className="px-2.5 py-1 bg-purple-600/20 hover:bg-purple-600/40 text-purple-300 border border-purple-500/40 font-bold text-[11px] rounded-xl transition flex items-center gap-1"
-                            title="Promote to Room Admin and choose rights"
-                          >
-                            <Shield className="w-3 h-3 text-purple-400" />
-                            <span>Make Admin</span>
-                          </button>
-                        ) : (
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => {
-                                const currentRights = room.roomAdminRights?.[username] || {
-                                  canDeleteMessages: true,
-                                  canPinMessages: true,
-                                  canManagePolls: true,
-                                };
-                                setConfiguringRightsUser(username);
-                                setEditingRights(currentRights);
-                              }}
-                              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[10px] font-bold rounded-lg transition"
-                              title="Edit Admin Rights"
-                            >
-                              ⚙️
-                            </button>
-                            <button
-                              onClick={() => onDemoteRoomAdmin?.(room.id, username)}
-                              className="px-2 py-1 bg-red-950/80 hover:bg-red-900 text-red-300 border border-red-800/80 text-[10px] font-bold rounded-lg transition flex items-center gap-0.5"
-                              title="Remove from Admin"
-                            >
-                              <UserX className="w-3 h-3 text-red-400" />
-                            </button>
-                          </div>
-                        )
-                      )}
 
                       {username !== currentUser.username ? (
                         <button
@@ -1252,9 +1442,9 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                             setShowMembersModal(false);
                             onOpenPrivateChat?.(username);
                           }}
-                          className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs rounded-xl transition flex items-center gap-1"
+                          className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs rounded-xl transition cursor-pointer"
                         >
-                          <span>Chat</span>
+                          Chat
                         </button>
                       ) : (
                         <span className="text-[10px] font-bold text-slate-500 px-2 py-1 rounded bg-slate-800">
@@ -1282,13 +1472,13 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                     📜 Room Activity Logs
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    Real-time member join & leave records with timestamps
+                    Real-time member join & leave records
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setShowRoomLogsModal(false)}
-                className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white"
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1296,17 +1486,13 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
 
             <div className="max-h-80 overflow-y-auto space-y-2 pr-1">
               {roomLogs.length === 0 ? (
-                <div className="p-8 text-center bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
-                  <div className="w-10 h-10 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
-                    <Clock className="w-5 h-5" />
-                  </div>
-                  <p className="text-xs text-slate-400 font-medium">No activity logged yet.</p>
+                <div className="p-8 text-center bg-slate-950 rounded-2xl border border-slate-800">
+                  <p className="text-xs text-slate-400">No activity logged yet.</p>
                 </div>
               ) : (
                 roomLogs.map((log) => {
                   const isJoin = log.action === 'joined';
                   const isLeave = log.action === 'left';
-                  const isCreate = log.action === 'created';
                   const logDate = new Date(log.timestamp);
                   const formattedDate = logDate.toLocaleDateString(undefined, {
                     month: 'short',
@@ -1348,9 +1534,6 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                               {isJoin ? 'joined the room' : isLeave ? 'left the room' : 'created this room'}
                             </span>
                           </div>
-                          <div className="text-[10px] text-slate-500 font-mono">
-                            {log.displayName || `@${log.username}`}
-                          </div>
                         </div>
                       </div>
 
@@ -1368,7 +1551,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
               <button
                 type="button"
                 onClick={() => setShowRoomLogsModal(false)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition"
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition cursor-pointer"
               >
                 Close Log
               </button>
@@ -1377,444 +1560,41 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
         </div>
       )}
 
-      {/* Configure Admin Rights Modal */}
-      {configuringRightsUser && (
+      {/* Deletion Modal */}
+      {showDeletionModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 space-y-4 text-slate-100 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Shield className="w-5 h-5 text-purple-400" />
-                <h3 className="font-extrabold text-white text-base">
-                  Admin Rights: @{configuringRightsUser}
-                </h3>
-              </div>
-              <button
-                onClick={() => setConfiguringRightsUser(null)}
-                className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white"
-              >
-                <X className="w-4 h-4" />
-              </button>
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 text-slate-100 shadow-2xl">
+            <div className="flex items-center gap-2 text-red-400">
+              <AlertTriangle className="w-5 h-5" />
+              <h3 className="font-extrabold text-base text-white">Request Room Deletion</h3>
             </div>
-
             <p className="text-xs text-slate-400">
-              As Room Creator, choose the moderation privileges granted to <strong className="text-purple-300">@{configuringRightsUser}</strong>:
+              As Room Admin, explain why this campus room should be archived or removed:
             </p>
-
-            <div className="space-y-3 bg-slate-950 p-4 rounded-2xl border border-slate-800">
-              <label className="flex items-center justify-between cursor-pointer group">
-                <div className="space-y-0.5">
-                  <div className="text-xs font-bold text-slate-200 group-hover:text-white">
-                    🗑️ Delete Messages
-                  </div>
-                  <div className="text-[10px] text-slate-400">
-                    Can delete inappropriate messages posted in room
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={editingRights.canDeleteMessages}
-                  onChange={(e) =>
-                    setEditingRights({ ...editingRights, canDeleteMessages: e.target.checked })
-                  }
-                  className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 bg-slate-800 border-slate-700"
-                />
-              </label>
-
-              <div className="border-t border-slate-900"></div>
-
-              <label className="flex items-center justify-between cursor-pointer group">
-                <div className="space-y-0.5">
-                  <div className="text-xs font-bold text-slate-200 group-hover:text-white">
-                    📌 Pin Messages
-                  </div>
-                  <div className="text-[10px] text-slate-400">
-                    Can pin key announcements to top of the room
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={editingRights.canPinMessages}
-                  onChange={(e) =>
-                    setEditingRights({ ...editingRights, canPinMessages: e.target.checked })
-                  }
-                  className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 bg-slate-800 border-slate-700"
-                />
-              </label>
-
-              <div className="border-t border-slate-900"></div>
-
-              <label className="flex items-center justify-between cursor-pointer group">
-                <div className="space-y-0.5">
-                  <div className="text-xs font-bold text-slate-200 group-hover:text-white">
-                    📊 Manage Polls
-                  </div>
-                  <div className="text-[10px] text-slate-400">
-                    Can launch or remove campus polls in room
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={editingRights.canManagePolls}
-                  onChange={(e) =>
-                    setEditingRights({ ...editingRights, canManagePolls: e.target.checked })
-                  }
-                  className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 bg-slate-800 border-slate-700"
-                />
-              </label>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+            <textarea
+              value={deletionReasonInput}
+              onChange={(e) => setDeletionReasonInput(e.target.value)}
+              placeholder="e.g., Event has finished or topic completed..."
+              rows={3}
+              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-red-500"
+            />
+            <div className="flex justify-end gap-2">
               <button
-                type="button"
-                onClick={() => setConfiguringRightsUser(null)}
-                className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white"
+                onClick={() => setShowDeletionModal(false)}
+                className="px-4 py-2 text-xs text-slate-400 hover:text-white"
               >
                 Cancel
               </button>
               <button
-                type="button"
                 onClick={() => {
-                  onPromoteRoomAdmin?.(room.id, configuringRightsUser, editingRights);
-                  setConfiguringRightsUser(null);
+                  onRequestRoomDeletion(room.id, deletionReasonInput || 'Host requested deletion.');
+                  setShowDeletionModal(false);
                 }}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow-md transition flex items-center gap-1.5"
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl"
               >
-                <Check className="w-4 h-4" />
-                <span>Save Admin Rights</span>
+                Submit Request
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Share Room Join Link Modal */}
-      {showShareModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 text-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-10 h-10 rounded-2xl bg-orange-500/10 border border-orange-500/20 text-orange-400 flex items-center justify-center font-bold">
-                  <Share2 className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-sm text-white">Share Room Join Link</h3>
-                  <p className="text-[11px] text-slate-400">Invite fellow students to join live</p>
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  setShowShareModal(false);
-                  setCopiedLink(false);
-                }}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Room Type Notice */}
-            {room.isPrivate ? (
-              <div className="bg-purple-950/80 border border-purple-500/50 rounded-2xl p-3.5 space-y-2 text-purple-200">
-                <div className="flex items-center gap-2 font-bold text-xs text-purple-300">
-                  <Lock className="w-4 h-4 text-purple-400" />
-                  <span>🔒 Private Room Link</span>
-                </div>
-                <p className="text-[11px] leading-relaxed text-purple-200/90">
-                  This is a private room. Only students with this exact invite link or code can see and join this room.
-                </p>
-                {room.inviteCode && (
-                  <div className="flex items-center justify-between bg-purple-900/60 p-2 rounded-xl border border-purple-700">
-                    <span className="text-[10px] text-purple-300 font-medium">Invite Code:</span>
-                    <span className="text-xs font-mono font-black text-amber-300 tracking-wider">
-                      {room.inviteCode}
-                    </span>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="bg-emerald-950/80 border border-emerald-500/50 rounded-2xl p-3.5 space-y-1 text-emerald-200">
-                <div className="flex items-center gap-2 font-bold text-xs text-emerald-300">
-                  <span>🌐 Public Room Link</span>
-                </div>
-                <p className="text-[11px] leading-relaxed text-emerald-200/90">
-                  This room is public. Anyone on campus can view and participate.
-                </p>
-              </div>
-            )}
-
-            {/* Link Input & Copy */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-400 mb-1.5">
-                Direct Room Link
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  readOnly
-                  value={
-                    room.isPrivate && room.inviteCode
-                      ? `${window.location.origin}${window.location.pathname}?room=${room.id}&invite=${room.inviteCode}`
-                      : `${window.location.origin}${window.location.pathname}?room=${room.id}`
-                  }
-                  className="flex-1 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-300 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const link = room.isPrivate && room.inviteCode
-                      ? `${window.location.origin}${window.location.pathname}?room=${room.id}&invite=${room.inviteCode}`
-                      : `${window.location.origin}${window.location.pathname}?room=${room.id}`;
-                    if (navigator.clipboard) {
-                      navigator.clipboard.writeText(link);
-                      setCopiedLink(true);
-                      setTimeout(() => setCopiedLink(false), 2500);
-                    }
-                  }}
-                  className="px-4 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs flex items-center gap-1.5 transition shrink-0 active:scale-95"
-                >
-                  {copiedLink ? (
-                    <>
-                      <Check className="w-4 h-4 text-emerald-300" />
-                      <span>Copied!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Share2 className="w-4 h-4" />
-                      <span>Copy Link</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            <div className="pt-2 text-center">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowShareModal(false);
-                  setCopiedLink(false);
-                }}
-                className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Lightbox Modal */}
-      {lightboxImage && (
-        <div
-          onClick={() => setLightboxImage(null)}
-          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 cursor-pointer"
-        >
-          <div className="relative max-w-4xl max-h-[90vh]">
-            <img
-              src={lightboxImage}
-              alt="Full view"
-              className="max-w-full max-h-[85vh] object-contain rounded-2xl"
-            />
-            <p className="text-center text-xs text-slate-400 mt-2">
-              Tap anywhere to close
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Room Details Modal */}
-      {showEditRoomModal && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowEditRoomModal(false);
-          }}
-        >
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 text-slate-100">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Settings className="w-5 h-5 text-amber-400" />
-                <h3 className="font-extrabold text-base text-white">Edit Room Details</h3>
-              </div>
-              <button
-                onClick={() => setShowEditRoomModal(false)}
-                className="p-1 rounded-xl bg-slate-800 text-slate-400 hover:text-white"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!editTitle.trim()) return;
-                if (onUpdateRoom) {
-                  const payload: any = {
-                    title: editTitle.trim(),
-                    emoji: editEmoji.trim() || '💬',
-                    category: editCategory,
-                    description: editDescription.trim(),
-                    locationArea: editLocationArea.trim(),
-                    isPrivate: editIsPrivate,
-                    isListedPublicly: editIsPrivate ? editIsListedPublicly : false,
-                  };
-                  if (editIsPrivate && !room.inviteCode) {
-                    payload.inviteCode = 'ROOM-' + Math.random().toString(36).substring(2, 8).toUpperCase();
-                  }
-                  onUpdateRoom(room.id, payload);
-                }
-                setShowEditRoomModal(false);
-              }}
-              className="space-y-4"
-            >
-              {/* Emoji & Title */}
-              <div className="grid grid-cols-4 gap-2">
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1">Emoji</label>
-                  <input
-                    type="text"
-                    value={editEmoji}
-                    onChange={(e) => setEditEmoji(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-center text-lg focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div className="col-span-3">
-                  <label className="block text-xs font-bold text-slate-400 mb-1">Room Title</label>
-                  <input
-                    type="text"
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500"
-                    required
-                  />
-                </div>
-              </div>
-
-              {/* Public vs Private Room Switch */}
-              <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    {editIsPrivate ? (
-                      <Lock className="w-4 h-4 text-purple-400" />
-                    ) : (
-                      <Globe className="w-4 h-4 text-emerald-400" />
-                    )}
-                    <div>
-                      <div className="text-xs font-bold text-white">
-                        {editIsPrivate ? 'Private Room' : 'Public Room'}
-                      </div>
-                      <div className="text-[10px] text-slate-400">
-                        {editIsPrivate
-                          ? 'Protected with invite code / link'
-                          : 'Visible to everyone on campus in room list & live feed'}
-                      </div>
-                    </div>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={editIsPrivate}
-                      onChange={(e) => setEditIsPrivate(e.target.checked)}
-                      className="sr-only peer"
-                    />
-                    <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
-                  </label>
-                </div>
-
-                {/* Sub-option for Public Listing with Code when Private */}
-                {editIsPrivate && (
-                  <div className="pt-2 border-t border-slate-800/80 space-y-1.5 animate-in fade-in duration-150">
-                    <span className="text-[10px] font-bold text-purple-300 block">
-                      Private Room Visibility in Campus List:
-                    </span>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setEditIsListedPublicly(false)}
-                        className={`p-2 rounded-xl text-left border text-[11px] transition ${
-                          !editIsListedPublicly
-                            ? 'bg-purple-900/90 border-purple-500 text-white font-bold'
-                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        <div className="font-bold">🕶️ Secret Hidden</div>
-                        <div className="text-[9px] opacity-75">Link/code only</div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEditIsListedPublicly(true)}
-                        className={`p-2 rounded-xl text-left border text-[11px] transition ${
-                          editIsListedPublicly
-                            ? 'bg-purple-900/90 border-purple-500 text-white font-bold'
-                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        <div className="font-bold">🔒 Public List (Locked)</div>
-                        <div className="text-[9px] opacity-75">Code required to enter</div>
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Category */}
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1">Room Category</label>
-                <select
-                  value={editCategory}
-                  onChange={(e) => setEditCategory(e.target.value as any)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-slate-200 focus:outline-none focus:border-amber-500"
-                >
-                  <option value="canteen">🍛 Canteen & Food</option>
-                  <option value="fest">🎉 Fest & Cultural</option>
-                  <option value="exam">📚 Exam & Academics</option>
-                  <option value="bus">🚍 Bus & Travel</option>
-                  <option value="placement">💼 Placement & Jobs</option>
-                  <option value="complaint">🚰 Campus Issues</option>
-                  <option value="sports">🏆 Sports & Games</option>
-                  <option value="general">💬 General Discussion</option>
-                </select>
-              </div>
-
-              {/* Description */}
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1">Description</label>
-                <textarea
-                  value={editDescription}
-                  onChange={(e) => setEditDescription(e.target.value)}
-                  rows={3}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-medium text-slate-200 focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              {/* Location Area */}
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1">Location / Area</label>
-                <input
-                  type="text"
-                  value={editLocationArea}
-                  onChange={(e) => setEditLocationArea(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-slate-200 focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowEditRoomModal(false)}
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-amber-600/30 transition"
-                >
-                  Save Room Details
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}

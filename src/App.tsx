@@ -32,6 +32,7 @@ import { CreatePollModal } from './components/CreatePollModal';
 import { SupabaseDevModal } from './components/SupabaseDevModal';
 import { AppDownloadModal } from './components/AppDownloadModal';
 import { NotificationsModal } from './components/NotificationsModal';
+import { UserDetailsModal } from './components/UserDetailsModal';
 import { broadcastEngine } from './lib/broadcast';
 import { supabaseService } from './lib/supabaseService';
 
@@ -52,6 +53,7 @@ export default function App() {
 
   const [activePrivatePartner, setActivePrivatePartner] = useState<string | null>(null);
   const [showPrivateChatModal, setShowPrivateChatModal] = useState(false);
+  const [viewingUserProfileUsername, setViewingUserProfileUsername] = useState<string | null>(null);
 
   // Notifications State
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
@@ -371,21 +373,43 @@ export default function App() {
   }, [currentRoomId]);
 
   // Private Chat Helper Functions
-  const handleOpenPrivateChat = (partnerUsername: string) => {
-    requireRegistration('send direct private messages', () => {
-      setActivePrivatePartner(partnerUsername);
+  const handleOpenPrivateChat = async (partnerUsername: string) => {
+    requireRegistration('send direct private messages', async () => {
+      const clean = (partnerUsername || '').trim().toLowerCase().replace(/^@/, '');
+      if (!clean || clean === 'anonymous' || clean === 'guest') {
+        showToast('⚠️ Cannot chat with anonymous or guest users.', 'info');
+        return;
+      }
+
+      // Check if user exists
+      const isRegistered =
+        clean === 'muhammedrafii2002' ||
+        clean === currentUser.username.toLowerCase() ||
+        dbUsers.some((u) => u.username.toLowerCase() === clean);
+
+      let userExists = isRegistered;
+      if (!userExists) {
+        userExists = await supabaseService.checkUsernameExists(clean);
+      }
+
+      if (!userExists) {
+        showToast(`⚠️ User @${clean} does not exist. Cannot start private chat.`, 'info');
+        return;
+      }
+
+      setActivePrivatePartner(clean);
       setShowPrivateChatModal(true);
       // Clear DM unread flags for this partner
       setPrivateMessages((prev) =>
         prev.map((m) =>
-          m.senderUsername === partnerUsername && m.recipientUsername === currentUser.username
+          m.senderUsername.toLowerCase() === clean && m.recipientUsername.toLowerCase() === currentUser.username.toLowerCase()
             ? { ...m, isRead: true }
             : m
         )
       );
       setNotifications((prev) =>
         prev.map((n) =>
-          n.type === 'dm' && (!n.fromUsername || n.fromUsername === partnerUsername)
+          n.type === 'dm' && (!n.fromUsername || n.fromUsername.toLowerCase() === clean)
             ? { ...n, isRead: true }
             : n
         )
@@ -399,12 +423,34 @@ export default function App() {
     showToast('🗑️ Direct message deleted.', 'info');
   };
 
-  const handleSendPrivateMessage = (recipientUsername: string, content: string) => {
-    requireRegistration('send direct private messages', () => {
+  const handleSendPrivateMessage = async (recipientUsername: string, content: string) => {
+    requireRegistration('send direct private messages', async () => {
+      const clean = (recipientUsername || '').trim().toLowerCase().replace(/^@/, '');
+      if (!clean || clean === 'anonymous' || clean === 'guest') {
+        showToast('⚠️ Cannot message anonymous or guest users.', 'info');
+        return;
+      }
+
+      // Verify recipient exists
+      const isRegistered =
+        clean === 'muhammedrafii2002' ||
+        clean === currentUser.username.toLowerCase() ||
+        dbUsers.some((u) => u.username.toLowerCase() === clean);
+
+      let userExists = isRegistered;
+      if (!userExists) {
+        userExists = await supabaseService.checkUsernameExists(clean);
+      }
+
+      if (!userExists) {
+        showToast(`⚠️ Cannot send message: @${clean} does not exist.`, 'info');
+        return;
+      }
+
       const newMsg: PrivateMessage = {
         id: `pm-${Date.now()}`,
         senderUsername: currentUser.username,
-        recipientUsername,
+        recipientUsername: clean,
         content,
         timestamp: new Date().toISOString(),
         isRead: false,
@@ -416,7 +462,7 @@ export default function App() {
       // Trigger notification for recipient
       const dmNotif: AppNotification = {
         id: `notif-dm-${Date.now()}`,
-        recipientUsername,
+        recipientUsername: clean,
         title: `📩 Direct Message from @${currentUser.username}`,
         message: content.slice(0, 60),
         type: 'dm',
@@ -1167,10 +1213,139 @@ export default function App() {
 
   // Developer Admin Operations
   const handleUpdateRoom = (roomId: string, updates: Partial<TrendingRoom>) => {
+    const updatedTimestamp = new Date().toISOString();
     setRooms((prev) =>
-      prev.map((r) => (r.id === roomId ? { ...r, ...updates } : r))
+      prev.map((r) => (r.id === roomId ? { ...r, ...updates, lastActivityAt: updatedTimestamp } : r))
     );
     supabaseService.updateRoom(roomId, updates);
+    broadcastEngine.broadcast({
+      type: 'ROOM_UPDATED',
+      room: {
+        id: roomId,
+        ...updates,
+      } as any,
+    });
+    showToast('⚙️ Room details updated successfully!', 'success');
+  };
+
+  const handleJoinRoom = (roomId: string) => {
+    requireRegistration('join campus rooms', () => {
+      const room = rooms.find((r) => r.id === roomId);
+      if (!room) return;
+
+      const isCreator = Boolean(
+        (room.creatorUsername && currentUser.username === room.creatorUsername) ||
+        (!room.creatorUsername && room.roomType === 'student_created' && currentUser.displayName === room.creatorName)
+      );
+
+      if (isCreator) {
+        showToast('👑 You are the room creator and already an active member.', 'info');
+        return;
+      }
+
+      const isAlreadyJoined = Array.isArray(room.activeMembers) && room.activeMembers.includes(currentUser.username);
+      if (isAlreadyJoined) {
+        showToast(`✅ You are already a member of "${room.title}".`, 'info');
+        return;
+      }
+
+      const updatedMembers = [...(room.activeMembers || []), currentUser.username];
+      const newLog = {
+        id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        roomId,
+        username: currentUser.username,
+        displayName: currentUser.displayName,
+        action: 'joined' as const,
+        timestamp: new Date().toISOString(),
+      };
+      const updatedLogs = [newLog, ...(room.roomLogs || [])];
+
+      setRooms((prev) =>
+        prev.map((r) =>
+          r.id === roomId
+            ? {
+                ...r,
+                activeMembers: updatedMembers,
+                activePeopleCount: Math.max(1, updatedMembers.length),
+                roomLogs: updatedLogs,
+                lastActivityAt: new Date().toISOString(),
+              }
+            : r
+        )
+      );
+
+      if (room.isPrivate) {
+        setUnlockedPrivateRoomIds((prev) =>
+          prev.includes(roomId) ? prev : [...prev, roomId]
+        );
+      }
+
+      supabaseService.joinRoom(roomId, currentUser.username, currentUser.displayName);
+      broadcastEngine.broadcast({
+        type: 'ROOM_UPDATED',
+        room: {
+          ...room,
+          activeMembers: updatedMembers,
+          roomLogs: updatedLogs,
+        },
+      });
+
+      showToast(`🎉 You joined "${room.title}"! You can now send messages.`, 'success');
+    });
+  };
+
+  const handleLeaveRoom = (roomId: string) => {
+    const room = rooms.find((r) => r.id === roomId);
+    if (!room) return;
+
+    const isCreator = Boolean(
+      (room.creatorUsername && currentUser.username === room.creatorUsername) ||
+      (!room.creatorUsername && room.roomType === 'student_created' && currentUser.displayName === room.creatorName)
+    );
+
+    if (isCreator) {
+      showToast('👑 You are the room creator and cannot leave your own room.', 'info');
+      return;
+    }
+
+    const updatedMembers = (room.activeMembers || []).filter(
+      (u) => u !== currentUser.username
+    );
+    const newLog = {
+      id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      roomId,
+      username: currentUser.username,
+      displayName: currentUser.displayName,
+      action: 'left' as const,
+      timestamp: new Date().toISOString(),
+    };
+    const updatedLogs = [newLog, ...(room.roomLogs || [])];
+
+    setRooms((prev) =>
+      prev.map((r) =>
+        r.id === roomId
+          ? {
+              ...r,
+              activeMembers: updatedMembers,
+              activePeopleCount: Math.max(1, updatedMembers.length),
+              roomLogs: updatedLogs,
+              lastActivityAt: new Date().toISOString(),
+            }
+          : r
+      )
+    );
+
+    supabaseService.leaveRoom(roomId, currentUser.username, currentUser.displayName);
+    broadcastEngine.broadcast({
+      type: 'ROOM_UPDATED',
+      room: {
+        ...room,
+        activeMembers: updatedMembers,
+        roomLogs: updatedLogs,
+      },
+    });
+
+    showToast(`🚪 You left "${room.title}".`, 'info');
   };
 
   const handleSaveProfile = (prof: UserProfile) => {
@@ -1264,58 +1439,9 @@ export default function App() {
     // Add Lead Dev
     map.set('muhammedrafii2002', { username: 'muhammedrafii2002', displayName: 'Muhammed Rafi', badge: 'Lead Dev' });
 
-    // Add Current User
-    if (currentUser.username) {
-      map.set(currentUser.username, {
-        username: currentUser.username,
-        displayName: currentUser.displayName,
-        badge: currentUser.isAdmin ? 'Admin' : undefined,
-      });
-    }
-
-    // Add authors from feed posts
-    posts.forEach((p) => {
-      if (p.authorUsername) {
-        map.set(p.authorUsername, {
-          username: p.authorUsername,
-          displayName: p.authorDisplayName,
-          badge: p.authorBadge,
-        });
-      }
-    });
-
-    // Add room creators & room admins
-    rooms.forEach((r) => {
-      if (r.creatorUsername) {
-        map.set(r.creatorUsername, { username: r.creatorUsername });
-      }
-      r.roomAdmins?.forEach((a) => {
-        if (a) map.set(a, { username: a, badge: 'Room Admin' });
-      });
-    });
-
-    // Add senders from room messages
-    Object.values(messagesMap).forEach((msgList) => {
-      (msgList as ChatMessage[]).forEach((m) => {
-        if (m.senderUsername && !m.isAnonymous) {
-          map.set(m.senderUsername, {
-            username: m.senderUsername,
-            displayName: m.senderName,
-            badge: m.senderBadge,
-          });
-        }
-      });
-    });
-
-    // Add senders/recipients from private messages
-    privateMessages.forEach((m) => {
-      if (m.senderUsername) map.set(m.senderUsername, { username: m.senderUsername });
-      if (m.recipientUsername) map.set(m.recipientUsername, { username: m.recipientUsername });
-    });
-
     // Add registered users from database
     dbUsers.forEach((u) => {
-      if (u.username) {
+      if (u.username && u.username !== 'guest' && u.username !== 'anonymous') {
         map.set(u.username, {
           username: u.username,
           displayName: u.displayName,
@@ -1324,8 +1450,17 @@ export default function App() {
       }
     });
 
+    // Add Current User if registered
+    if (currentUser.username && currentUser.username !== 'guest' && currentUser.username !== 'anonymous' && currentUser.isRegistered) {
+      map.set(currentUser.username, {
+        username: currentUser.username,
+        displayName: currentUser.displayName,
+        badge: currentUser.isAdmin ? 'Admin' : undefined,
+      });
+    }
+
     return Array.from(map.values()).filter((m) => m.username !== currentUser.username);
-  }, [posts, rooms, messagesMap, privateMessages, currentUser, dbUsers]);
+  }, [currentUser, dbUsers]);
 
   const activeRoomObj = roomsWithRealMemberCounts.find((r) => r.id === currentRoomId);
 
@@ -1394,10 +1529,13 @@ export default function App() {
             onSendFloatingEmoji={handleSendFloatingEmoji}
             floatingReactions={floatingReactions}
             onOpenPrivateChat={handleOpenPrivateChat}
+            onSelectUser={(uname) => setViewingUserProfileUsername(uname)}
             onPromoteRoomAdmin={handlePromoteRoomAdmin}
             onDemoteRoomAdmin={handleDemoteRoomAdmin}
             onPinMessage={handlePinMessage}
             onUpdateRoom={handleUpdateRoom}
+            onJoinRoom={handleJoinRoom}
+            onLeaveRoom={handleLeaveRoom}
           />
         ) : activeTab === 'feed' ? (
           <LiveFeed
@@ -1430,6 +1568,7 @@ export default function App() {
             onLikeComment={handleLikeComment}
             fetchCommentsForPost={fetchCommentsForPost}
             onOpenPrivateChat={handleOpenPrivateChat}
+            onSelectUser={(uname) => setViewingUserProfileUsername(uname)}
           />
         ) : (
           <RoomList
@@ -1636,6 +1775,19 @@ export default function App() {
 
       {isSupabaseDevOpen && (
         <SupabaseDevModal onClose={() => setIsSupabaseDevOpen(false)} />
+      )}
+
+      {/* User Profile Viewer Modal */}
+      {viewingUserProfileUsername && (
+        <UserDetailsModal
+          username={viewingUserProfileUsername}
+          currentUser={currentUser}
+          onClose={() => setViewingUserProfileUsername(null)}
+          onOpenPrivateChat={(targetUsername) => {
+            setViewingUserProfileUsername(null);
+            handleOpenPrivateChat(targetUsername);
+          }}
+        />
       )}
     </div>
   );

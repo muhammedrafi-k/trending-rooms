@@ -171,7 +171,7 @@ export const supabaseService = {
       await this.ensureCollegeExists(room.collegeId);
     }
 
-    const { error } = await supabase.from('rooms').insert({
+    const payload: any = {
       id: room.id,
       college_id: room.collegeId,
       title: room.title,
@@ -188,7 +188,6 @@ export const supabaseService = {
       description: room.description,
       is_live_now: room.isLiveNow,
       is_private: room.isPrivate || false,
-      is_listed_publicly: room.isListedPublicly || false,
       invite_code: room.inviteCode || null,
       allowed_users: room.allowedUsers || [],
       active_members: room.activeMembers || [],
@@ -199,7 +198,20 @@ export const supabaseService = {
       room_admins: room.roomAdmins || [],
       room_admin_rights: room.roomAdminRights || {},
       top_contributor: room.topContributor || null,
-    });
+    };
+
+    let { error } = await supabase.from('rooms').insert(payload);
+
+    // Auto-recover if table has missing optional columns (e.g. PGRST204)
+    if (error && error.code === 'PGRST204') {
+      console.warn('PGRST204 missing column in rooms schema during insert:', error.message);
+      const match = error.message.match(/'([^']+)' column/);
+      if (match && match[1] && payload[match[1]] !== undefined) {
+        delete payload[match[1]];
+        const retryRes = await supabase.from('rooms').insert(payload);
+        error = retryRes.error;
+      }
+    }
 
     if (error) {
       console.error('Error creating room in Supabase:', error);
@@ -573,7 +585,6 @@ export const supabaseService = {
       if (updates.locationArea !== undefined) payload.location_area = updates.locationArea;
       if (updates.isLiveNow !== undefined) payload.is_live_now = updates.isLiveNow;
       if (updates.isPrivate !== undefined) payload.is_private = updates.isPrivate;
-      if (updates.isListedPublicly !== undefined) payload.is_listed_publicly = updates.isListedPublicly;
       if (updates.inviteCode !== undefined) payload.invite_code = updates.inviteCode;
       if (updates.allowedUsers !== undefined) payload.allowed_users = updates.allowedUsers;
       if (updates.activeMembers !== undefined) payload.active_members = updates.activeMembers;
@@ -583,7 +594,31 @@ export const supabaseService = {
       if (updates.roomAdmins !== undefined) payload.room_admins = updates.roomAdmins;
       if (updates.roomAdminRights !== undefined) payload.room_admin_rights = updates.roomAdminRights;
 
-      const { error } = await supabase.from('rooms').update(payload).eq('id', roomId);
+      let { error } = await supabase.from('rooms').update(payload).eq('id', roomId);
+
+      // Auto-recovery if database has missing optional columns (PGRST204)
+      if (error && error.code === 'PGRST204') {
+        console.warn('PGRST204 missing column in rooms schema during update, attempting auto-recovery:', error.message);
+        // Extract the missing column name if available
+        const match = error.message.match(/'([^']+)' column/);
+        if (match && match[1] && payload[match[1]] !== undefined) {
+          delete payload[match[1]];
+          const retryRes = await supabase.from('rooms').update(payload).eq('id', roomId);
+          error = retryRes.error;
+        } else {
+          // Fallback to core guaranteed columns
+          const corePayload: any = {};
+          if (payload.title !== undefined) corePayload.title = payload.title;
+          if (payload.category !== undefined) corePayload.category = payload.category;
+          if (payload.emoji !== undefined) corePayload.emoji = payload.emoji;
+          if (payload.description !== undefined) corePayload.description = payload.description;
+          if (payload.location_area !== undefined) corePayload.location_area = payload.location_area;
+          if (payload.is_live_now !== undefined) corePayload.is_live_now = payload.is_live_now;
+          const retryRes = await supabase.from('rooms').update(corePayload).eq('id', roomId);
+          error = retryRes.error;
+        }
+      }
+
       if (error) {
         console.error('Error updating room in Supabase:', error);
         return false;

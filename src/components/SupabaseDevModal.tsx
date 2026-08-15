@@ -8,11 +8,37 @@ interface SupabaseDevModalProps {
 
 export const SupabaseDevModal: React.FC<SupabaseDevModalProps> = ({ onClose }) => {
   const [copied, setCopied] = useState(false);
+  const [copiedMigration, setCopiedMigration] = useState(false);
+  const [activeSqlTab, setActiveSqlTab] = useState<'migration' | 'full'>('migration');
   const config = getSupabaseConfig();
   const [urlInput, setUrlInput] = useState(config.url);
   const [keyInput, setKeyInput] = useState(config.key);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const migrationSql = `-- 🔧 SUPABASE SQL MIGRATION: Fix missing column errors on existing database
+-- Run this in Supabase Dashboard > SQL Editor > Run
+
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_private BOOLEAN DEFAULT FALSE;
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS invite_code TEXT;
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS allowed_users JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS active_members JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS room_logs JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS room_admins JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS room_admin_rights JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS pinned_message_id TEXT;
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS deletion_requested BOOLEAN DEFAULT FALSE;
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS deletion_reason TEXT;
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS top_contributor JSONB DEFAULT NULL;
+
+-- Support for threaded comments & likes
+ALTER TABLE feed_comments ADD COLUMN IF NOT EXISTS parent_id TEXT REFERENCES feed_comments(id) ON DELETE CASCADE;
+ALTER TABLE feed_comments ADD COLUMN IF NOT EXISTS likes TEXT[] DEFAULT '{}'::text[];
+ALTER TABLE feed_comments ADD COLUMN IF NOT EXISTS likes_count INT DEFAULT 0;
+
+-- Refresh Supabase PostgREST schema cache
+NOTIFY pgrst, 'reload schema';
+`;
 
   const sqlSchema = `-- Supabase PostgreSQL Production Schema for Trending Rooms
 -- Lead Developer: Muhammed Rafi (muhammedrafii2002@gmail.com)
@@ -62,6 +88,11 @@ CREATE TABLE IF NOT EXISTS rooms (
   expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days'),
   description TEXT,
   is_live_now BOOLEAN DEFAULT TRUE,
+  is_private BOOLEAN DEFAULT FALSE,
+  invite_code TEXT,
+  allowed_users JSONB DEFAULT '[]'::jsonb,
+  active_members JSONB DEFAULT '[]'::jsonb,
+  room_logs JSONB DEFAULT '[]'::jsonb,
   has_active_poll BOOLEAN DEFAULT FALSE,
   creator_name TEXT,
   creator_username TEXT,
@@ -196,6 +227,12 @@ ON CONFLICT (username) DO UPDATE SET email = 'muhammedrafii2002@gmail.com', pass
     navigator.clipboard.writeText(sqlSchema);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const copyMigration = () => {
+    navigator.clipboard.writeText(migrationSql);
+    setCopiedMigration(true);
+    setTimeout(() => setCopiedMigration(false), 2000);
   };
 
   const handleSaveKeys = (e: React.FormEvent) => {
@@ -334,24 +371,69 @@ ON CONFLICT (username) DO UPDATE SET email = 'muhammedrafii2002@gmail.com', pass
             </form>
           </div>
 
-          {/* SQL Schema Copy Box */}
+          {/* SQL Schema / Migration Copy Box */}
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h4 className="font-bold text-white flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
                 <Terminal className="w-4 h-4 text-emerald-400" />
-                <span>1. Run SQL Schema in Supabase SQL Editor</span>
-              </h4>
+                <h4 className="font-bold text-white">Database SQL Scripts</h4>
+                <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800 ml-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveSqlTab('migration')}
+                    className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition ${
+                      activeSqlTab === 'migration'
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    🔧 Migration (Fix Column Errors)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSqlTab('full')}
+                    className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition ${
+                      activeSqlTab === 'full'
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    📦 Full Setup Schema
+                  </button>
+                </div>
+              </div>
               <button
-                onClick={copySql}
-                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 border border-slate-700 transition"
+                onClick={activeSqlTab === 'migration' ? copyMigration : copySql}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 border border-slate-700 transition shrink-0"
               >
-                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copied ? 'Copied SQL!' : 'Copy SQL Script'}</span>
+                {activeSqlTab === 'migration' ? (
+                  copiedMigration ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Copied Migration SQL!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy Migration SQL</span>
+                    </>
+                  )
+                ) : copied ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Copied Full Schema!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copy Full Schema</span>
+                  </>
+                )}
               </button>
             </div>
 
             <pre className="p-4 rounded-2xl bg-slate-950 border border-slate-800 font-mono text-[11px] leading-relaxed text-emerald-400 overflow-x-auto max-h-56">
-              {sqlSchema}
+              {activeSqlTab === 'migration' ? migrationSql : sqlSchema}
             </pre>
           </div>
 

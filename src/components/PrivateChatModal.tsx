@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Send, Lock, User, MessageSquare, ArrowLeft, Search, ShieldCheck, Trash2 } from 'lucide-react';
+import { X, Send, Lock, User, MessageSquare, ArrowLeft, Search, ShieldCheck, ShieldAlert, Trash2 } from 'lucide-react';
 import { PrivateMessage, UserProfile } from '../types';
 
 interface PrivateChatModalProps {
@@ -34,12 +34,24 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
   const [inChatSearch, setInChatSearch] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  const cleanPartner = (partnerUsername || '').trim().toLowerCase().replace(/^@/, '');
+  const isPartnerKnown = Boolean(
+    cleanPartner &&
+      cleanPartner !== 'anonymous' &&
+      cleanPartner !== 'guest' &&
+      (cleanPartner === 'muhammedrafii2002' ||
+        cleanPartner === currentUser.username.toLowerCase() ||
+        availableMembers.some((m) => m.username.toLowerCase() === cleanPartner))
+  );
+
   // Filter messages for current partner
   const activeConversationMessages = partnerUsername
     ? messages.filter(
         (m) =>
-          (m.senderUsername === currentUser.username && m.recipientUsername === partnerUsername) ||
-          (m.senderUsername === partnerUsername && m.recipientUsername === currentUser.username)
+          (m.senderUsername.toLowerCase() === currentUser.username.toLowerCase() &&
+            m.recipientUsername.toLowerCase() === cleanPartner) ||
+          (m.senderUsername.toLowerCase() === cleanPartner &&
+            m.recipientUsername.toLowerCase() === currentUser.username.toLowerCase())
       )
     : [];
 
@@ -57,20 +69,22 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim() || !partnerUsername) return;
+    if (!inputText.trim() || !partnerUsername || !isPartnerKnown) return;
 
-    onSendMessage(partnerUsername, inputText.trim());
+    onSendMessage(cleanPartner, inputText.trim());
     setInputText('');
   };
 
   const filteredConversations = allConversations.filter((username) => {
+    const clean = (username || '').toLowerCase();
+    if (clean === 'anonymous' || clean === 'guest') return false;
     if (!searchFilter.trim()) return true;
     const term = searchFilter.trim().toLowerCase();
-    const userMatches = username.toLowerCase().includes(term);
+    const userMatches = clean.includes(term);
     const userMsgs = messages.filter(
       (m) =>
-        (m.senderUsername === currentUser.username && m.recipientUsername === username) ||
-        (m.senderUsername === username && m.recipientUsername === currentUser.username)
+        (m.senderUsername.toLowerCase() === currentUser.username.toLowerCase() && m.recipientUsername.toLowerCase() === clean) ||
+        (m.senderUsername.toLowerCase() === clean && m.recipientUsername.toLowerCase() === currentUser.username.toLowerCase())
     );
     const msgMatches = userMsgs.some((m) => m.content.toLowerCase().includes(term));
     return userMatches || msgMatches;
@@ -78,7 +92,9 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
 
   const filteredMembers = availableMembers.filter(
     (m) =>
-      m.username !== currentUser.username &&
+      m.username.toLowerCase() !== currentUser.username.toLowerCase() &&
+      m.username.toLowerCase() !== 'anonymous' &&
+      m.username.toLowerCase() !== 'guest' &&
       (m.username.toLowerCase().includes(searchFilter.trim().toLowerCase()) ||
         (m.displayName && m.displayName.toLowerCase().includes(searchFilter.trim().toLowerCase())))
   );
@@ -369,10 +385,20 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-950/80">
-              <div className="bg-slate-900/60 rounded-xl border border-slate-800 p-3 text-center text-xs text-slate-400 max-w-sm mx-auto my-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-400 mx-auto mb-1" />
-                <span>You are chatting privately with <strong className="text-white">@{partnerUsername}</strong>. Messages are private to you both.</span>
-              </div>
+              {isPartnerKnown ? (
+                <div className="bg-slate-900/60 rounded-xl border border-slate-800 p-3 text-center text-xs text-slate-400 max-w-sm mx-auto my-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400 mx-auto mb-1" />
+                  <span>You are chatting privately with <strong className="text-white">@{partnerUsername}</strong>. Messages are private to you both.</span>
+                </div>
+              ) : (
+                <div className="bg-rose-950/40 border border-rose-800/60 rounded-xl p-3 text-center text-xs text-rose-300 max-w-md mx-auto my-2 space-y-1">
+                  <ShieldAlert className="w-5 h-5 text-rose-400 mx-auto" />
+                  <p className="font-bold text-rose-200">User @{partnerUsername} does not exist</p>
+                  <p className="text-[11px] text-rose-300/80">
+                    This username is not registered on the campus network. Sending messages to non-existent accounts is disabled.
+                  </p>
+                </div>
+              )}
 
               {displayedChatMessages.length === 0 ? (
                 <div className="text-center py-12 text-slate-500 space-y-2">
@@ -382,12 +408,14 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
                   <p className="text-xs">
                     {inChatSearch
                       ? `No chat messages matched "${inChatSearch}"`
-                      : `No private messages yet. Say hi to @${partnerUsername}!`}
+                      : isPartnerKnown
+                      ? `No private messages yet. Say hi to @${partnerUsername}!`
+                      : `No conversation found.`}
                   </p>
                 </div>
               ) : (
                 displayedChatMessages.map((msg) => {
-                  const isMe = msg.senderUsername === currentUser.username;
+                  const isMe = msg.senderUsername.toLowerCase() === currentUser.username.toLowerCase();
                   return (
                     <div
                       key={msg.id}
@@ -418,7 +446,7 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
                             {(isMe || currentUser.isAdmin) && onDeleteMessage && (
                               <button
                                 onClick={() => onDeleteMessage(msg.id)}
-                                className="p-1 hover:bg-black/20 rounded transition text-red-200 hover:text-red-400"
+                                className="p-1 hover:bg-black/20 rounded transition text-red-200 hover:text-red-400 cursor-pointer"
                                 title="Delete message"
                               >
                                 <Trash2 className="w-3 h-3 text-red-300 hover:text-red-100" />
@@ -443,14 +471,19 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
               <input
                 type="text"
                 value={inputText}
+                disabled={!isPartnerKnown}
                 onChange={(e) => setInputText(e.target.value)}
-                placeholder={`Message @${partnerUsername} privately...`}
-                className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
+                placeholder={
+                  isPartnerKnown
+                    ? `Message @${partnerUsername} privately...`
+                    : `Cannot message non-existent user @${partnerUsername}`
+                }
+                className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 disabled:opacity-40 disabled:cursor-not-allowed"
               />
               <button
                 type="submit"
-                disabled={!inputText.trim()}
-                className="p-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white transition disabled:opacity-40"
+                disabled={!inputText.trim() || !isPartnerKnown}
+                className="p-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white transition disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
               >
                 <Send className="w-4 h-4" />
               </button>
