@@ -34,12 +34,16 @@ import { SupabaseDevModal } from './components/SupabaseDevModal';
 import { AppDownloadModal } from './components/AppDownloadModal';
 import { NotificationsModal } from './components/NotificationsModal';
 import { UserDetailsModal } from './components/UserDetailsModal';
+import { SearchModal } from './components/SearchModal';
 import { broadcastEngine } from './lib/broadcast';
 import { supabaseService } from './lib/supabaseService';
 
 export default function App() {
   // Navigation tab: 'feed' | 'rooms' | 'dms'
   const [activeTab, setActiveTab] = useState<'feed' | 'rooms' | 'dms'>('feed');
+
+  // Search Modal State
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
 
   // Private Chat State
   const [privateMessages, setPrivateMessages] = useState<PrivateMessage[]>(() => {
@@ -116,7 +120,7 @@ export default function App() {
     return {
       id: `guest-${Date.now()}-${guestRandom}`,
       profileId: `PID-${Math.floor(100000 + Math.random() * 900000)}`,
-      username: `student_${guestRandom}`,
+      username: `user_${guestRandom}`,
       displayName: 'Campus Visitor',
       email: '',
       password: '',
@@ -1279,8 +1283,8 @@ export default function App() {
         roomId: currentRoomId,
         senderName,
         isAnonymous,
-        witnessDistanceText: '📍 Live Campus Poll',
-        content: `📊 Campus Live Poll: ${question}`,
+        witnessDistanceText: '📍 Live Poll',
+        content: `📊 Live Poll: ${question}`,
         poll: pollData,
         timestamp: new Date().toISOString(),
         reactions: { '📊': 1 },
@@ -1410,6 +1414,14 @@ export default function App() {
   };
 
   const handleJoinPrivateRoomWithCode = (codeOrLink: string): { success: boolean; message: string } => {
+    if (!currentUser.isRegistered || currentUser.username === 'guest') {
+      requireRegistration('join private rooms with invite code', () => {});
+      return {
+        success: false,
+        message: 'Guest access is restricted for private rooms. Please create an account or sign in to join.',
+      };
+    }
+
     const query = codeOrLink.trim();
     if (!query) {
       return { success: false, message: 'Please enter a valid invite code or room link.' };
@@ -1575,7 +1587,7 @@ export default function App() {
         collegeId: currentCollege.id,
         title: `🔥 Discussion: ${post.content.slice(0, 30)}...`,
         category: post.category === 'weather' ? 'weather' : post.category === 'traffic' ? 'bus' : 'general',
-        roomType: 'student_created',
+        roomType: 'user_created',
         emoji: post.category === 'fest' ? '🎉' : post.category === 'weather' ? '🌧️' : '💬',
         locationArea: post.locationName,
         activePeopleCount: 12,
@@ -1764,7 +1776,7 @@ export default function App() {
   };
 
   const handleJoinRoom = (roomId: string, codeInput?: string) => {
-    requireRegistration('join campus rooms', () => {
+    requireRegistration('join rooms', () => {
       const room = rooms.find((r) => r.id === roomId);
       if (!room) return;
 
@@ -2063,6 +2075,7 @@ export default function App() {
         unreadNotificationsCount={notifications.filter((n) => !n.isRead).length}
         onOpenNotifications={() => setIsNotificationsOpen(true)}
         onOpenDownloadModal={() => setIsDownloadModalOpen(true)}
+        onOpenSearchModal={() => setIsSearchModalOpen(true)}
       />
 
       {/* Toast Notification Banner */}
@@ -2117,6 +2130,7 @@ export default function App() {
             onJoinRoom={handleJoinRoom}
             onLeaveRoom={handleLeaveRoom}
             onDeleteRoom={handleDeleteRoom}
+            onRequireRegistration={(action) => requireRegistration(action, () => {})}
           />
         ) : activeTab === 'feed' ? (
           <LiveFeed
@@ -2151,6 +2165,39 @@ export default function App() {
             onOpenPrivateChat={handleOpenPrivateChat}
             onSelectUser={(uname) => setViewingUserProfileUsername(uname)}
           />
+        ) : activeTab === 'dms' ? (
+          <PrivateChatModal
+            currentUser={currentUser}
+            partnerUsername={activePrivatePartner}
+            messages={privateMessages}
+            allConversations={allConversationPartners}
+            availableMembers={allCampusMembers}
+            onSendMessage={handleSendPrivateMessage}
+            onDeleteMessage={handleDeletePrivateMessage}
+            onSelectPartner={(username) => {
+              setActivePrivatePartner(username || null);
+              if (username) {
+                setPrivateMessages((prev) =>
+                  prev.map((m) =>
+                    m.senderUsername === username && m.recipientUsername === currentUser.username
+                      ? { ...m, isRead: true }
+                      : m
+                  )
+                );
+                setNotifications((prev) =>
+                  prev.map((n) =>
+                    n.type === 'dm' && (!n.fromUsername || n.fromUsername === username)
+                      ? { ...n, isRead: true }
+                      : n
+                  )
+                );
+              }
+            }}
+            onClose={() => {
+              setActiveTab('rooms');
+            }}
+            isTabEmbed={true}
+          />
         ) : (
           <RoomList
             rooms={roomsWithRealMemberCounts.filter((r) => r.collegeId === currentCollege.id || r.collegeId === 'sn_cherthala')}
@@ -2173,9 +2220,14 @@ export default function App() {
       <BottomNav
         activeTab={activeTab}
         onChangeTab={(tab) => {
-          setActiveTab(tab);
+          setShowPrivateChatModal(false);
+          setCurrentRoomId(null);
           if (tab === 'dms') {
-            requireRegistration('view direct messages', () => setShowPrivateChatModal(true));
+            requireRegistration('view direct messages', () => {
+              setActiveTab('dms');
+            });
+          } else {
+            setActiveTab(tab);
           }
         }}
         onOpenCreateRoom={() =>
@@ -2189,8 +2241,8 @@ export default function App() {
         unreadDmsCount={unreadDmsCount}
       />
 
-      {/* Direct Private Chat Modal */}
-      {(showPrivateChatModal || activeTab === 'dms') && (
+      {/* Direct Private Chat Popup Modal (when opened from buttons on another tab) */}
+      {showPrivateChatModal && activeTab !== 'dms' && (
         <PrivateChatModal
           currentUser={currentUser}
           partnerUsername={activePrivatePartner}
@@ -2220,8 +2272,8 @@ export default function App() {
           }}
           onClose={() => {
             setShowPrivateChatModal(false);
-            if (activeTab === 'dms') setActiveTab('rooms');
           }}
+          isTabEmbed={false}
         />
       )}
 
@@ -2372,6 +2424,36 @@ export default function App() {
 
       {isSupabaseDevOpen && (
         <SupabaseDevModal onClose={() => setIsSupabaseDevOpen(false)} />
+      )}
+
+      {/* Search Modal for profiles, posts, and spikes/rooms */}
+      {isSearchModalOpen && (
+        <SearchModal
+          isOpen={isSearchModalOpen}
+          allUsers={allCampusMembers}
+          users={allCampusMembers}
+          posts={posts}
+          rooms={roomsWithRealMemberCounts}
+          currentUser={currentUser}
+          onClose={() => setIsSearchModalOpen(false)}
+          onSelectUser={(username) => {
+            setIsSearchModalOpen(false);
+            setViewingUserProfileUsername(username);
+          }}
+          onSelectPost={(post) => {
+            setIsSearchModalOpen(false);
+            setActiveTab('feed');
+          }}
+          onSelectRoom={(roomId) => {
+            setIsSearchModalOpen(false);
+            setCurrentRoomId(roomId);
+            setActiveTab('rooms');
+          }}
+          onOpenPrivateChat={(username) => {
+            setIsSearchModalOpen(false);
+            handleOpenPrivateChat(username);
+          }}
+        />
       )}
 
       {/* User Profile Viewer Modal */}

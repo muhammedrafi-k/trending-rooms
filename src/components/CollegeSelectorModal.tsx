@@ -121,7 +121,7 @@ export const CollegeSelectorModal: React.FC<CollegeSelectorModalProps> = ({
                         <span>•</span>
                         <span className="flex items-center gap-1 font-semibold text-slate-600">
                           <Users className="w-3 h-3 text-emerald-600" />
-                          {col.studentCount} students
+                          {col.studentCount} users
                         </span>
                       </>
                     )}

@@ -193,7 +193,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                   <div className="flex items-center justify-between text-slate-500 mb-2">
-                    <span className="text-xs font-bold uppercase">Active Students</span>
+                    <span className="text-xs font-bold uppercase">Active Users</span>
                     <Users className="w-4 h-4 text-emerald-600" />
                   </div>
                   <div className="text-2xl font-black text-slate-900">{totalActiveUsers.toLocaleString()}</div>
@@ -456,7 +456,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                           <div>
                             <h4 className="text-sm font-bold text-slate-900">{room.title}</h4>
                             <span className="text-xs text-slate-500">
-                              Creator: @{room.creatorUsername || room.creatorName || 'student_creator'}
+                              Creator: @{room.creatorUsername || room.creatorName || 'campus_creator'}
                             </span>
                           </div>
                         </div>

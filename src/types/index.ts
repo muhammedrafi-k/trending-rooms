@@ -1,4 +1,4 @@
-export type RoomType = 'auto_trending' | 'student_created';
+export type RoomType = 'auto_trending' | 'student_created' | 'user_created';
 
 export type RoomCategory =
   | 'fest'

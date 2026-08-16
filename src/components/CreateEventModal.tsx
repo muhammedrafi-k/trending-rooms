@@ -18,8 +18,8 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<RoomCategory>('canteen');
   const [description, setDescription] = useState('');
-  const [locationArea, setLocationArea] = useState('Main Campus');
-  const [creatorName, setCreatorName] = useState(currentUserUsername || 'Campus Student');
+  const [locationArea, setLocationArea] = useState('Main Area');
+  const [creatorName, setCreatorName] = useState(currentUserUsername || 'User');
   const [isPrivate, setIsPrivate] = useState(false);
 
   const categoryOptions: { id: RoomCategory; label: string; emoji: string }[] = [
@@ -28,7 +28,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
     { id: 'exam', label: 'Exam / Academics', emoji: '📚' },
     { id: 'bus', label: 'Bus / Travel', emoji: '🚍' },
     { id: 'placement', label: 'Placement & Career', emoji: '💼' },
-    { id: 'complaint', label: 'Campus Issue', emoji: '🚰' },
+    { id: 'complaint', label: 'Issues & Reports', emoji: '🚰' },
     { id: 'sports', label: 'Sports & Games', emoji: '🏆' },
     { id: 'general', label: 'General Chat', emoji: '💬' },
   ];
@@ -50,9 +50,9 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
     const newRoom: TrendingRoom = {
       id: `room-${currentCollege.id}-${Date.now()}`,
       collegeId: currentCollege.id,
-      title: `${emoji} ${title.trim()}`,
+      title: title.trim(),
       category,
-      roomType: 'student_created',
+      roomType: 'user_created',
       emoji,
       locationArea: locationArea.trim() || currentCollege.area,
       activePeopleCount: 1,
@@ -80,11 +80,11 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
           ]
         : [],
       hasActivePoll: false,
-      creatorName: creatorName.trim() || (creatorUser ? `@${creatorUser}` : 'Campus Member'),
+      creatorName: creatorName.trim() || (creatorUser ? `@${creatorUser}` : 'Community Member'),
       creatorUsername: creatorUser || undefined,
       roomAdmins: [],
       topContributor: {
-        name: creatorName.trim() || (creatorUser ? `@${creatorUser}` : 'Campus Member'),
+        name: creatorName.trim() || (creatorUser ? `@${creatorUser}` : 'Community Member'),
         badge: '👑 Room Creator',
       },
     };
@@ -109,7 +109,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
             </div>
             <div>
               <h3 className="font-extrabold text-slate-900 text-base">
-                Create Campus Room
+                Create Room
               </h3>
               <p className="text-xs text-slate-500 flex items-center gap-1">
                 <School className="w-3.5 h-3.5 text-slate-400" />
@@ -148,7 +148,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                     <span>🌐 Public Room</span>
                   </div>
                   <div className="text-[11px] text-slate-500 leading-tight">
-                    Visible to all campus students. Anyone can join, view, and participate.
+                    Visible to all users. Anyone can join, view, and participate.
                   </div>
                 </button>
 
@@ -189,7 +189,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                 required
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Canteen Pazham Pori & Tea Review or S4 Study Group"
+                placeholder="e.g. Project Discussion or Study Group"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-xs font-medium text-slate-900 placeholder-slate-400"
               />
             </div>
@@ -218,10 +218,10 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
               </div>
             </div>
 
-            {/* Campus Location Area */}
+            {/* Location Area */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                Campus Spot / Location Area
+                Spot / Location Area
               </label>
               <div className="relative">
                 <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
@@ -229,7 +229,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                   type="text"
                   value={locationArea}
                   onChange={(e) => setLocationArea(e.target.value)}
-                  placeholder="e.g. Main Canteen, Science Block, Gate #2..."
+                  placeholder="e.g. Main Area, Block A, Room 204..."
                   className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-orange-500 text-xs font-medium text-slate-800"
                 />
               </div>
@@ -244,7 +244,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                 rows={2}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Give context or ask students to share opinions & photos..."
+                placeholder="Give context or ask users to share opinions & photos..."
                 className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-orange-500 text-xs font-medium text-slate-800 placeholder-slate-400 resize-none"
               />
             </div>
@@ -265,7 +265,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
               className="px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-bold text-xs shadow-md shadow-orange-500/20 transition flex items-center gap-1.5"
             >
               <Plus className="w-4 h-4" />
-              <span>Launch Campus Room</span>
+              <span>Launch Room</span>
             </button>
           </div>
         </form>

@@ -64,7 +64,7 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
                 Create Campus Live Poll
               </h3>
               <p className="text-xs text-slate-500">
-                Students love voting! Get instant real-time feedback
+                Users love voting! Get instant real-time feedback
               </p>
             </div>
           </div>
@@ -138,7 +138,7 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
             <label htmlFor="poll-anon" className="text-xs font-bold text-slate-700 cursor-pointer flex items-center gap-1.5">
               <span>🕵️ Create Anonymously</span>
               <span className="text-[10px] text-slate-400 font-normal">
-                (Hide your student name)
+                (Hide your username)
               </span>
             </label>
             <input

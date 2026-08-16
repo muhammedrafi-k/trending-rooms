@@ -37,6 +37,11 @@ export const RoomCard: React.FC<RoomCardProps> = ({
     }
   };
 
+  const rawTitle = room.title || '';
+  // Strip duplicate leading emoji if present in room.title
+  const cleanTitle = rawTitle.replace(/^(\p{Emoji}|\uD83C[\uDF00-\uDFFF]|\uD83D[\uDC00-\uDE4F]|\uD83E[\uDD00-\uDDFF])\s*/u, '').trim();
+  const displayEmoji = room.emoji || '💬';
+
   return (
     <div
       onClick={() => onEnterRoom(room)}
@@ -81,7 +86,8 @@ export const RoomCard: React.FC<RoomCardProps> = ({
 
         {/* Room Title */}
         <h3 className="text-base font-extrabold text-slate-900 group-hover:text-orange-600 transition-colors line-clamp-1 mb-1.5 flex items-center gap-1.5">
-          <span>{room.title}</span>
+          <span className="shrink-0 text-lg">{displayEmoji}</span>
+          <span className="truncate">{cleanTitle || rawTitle}</span>
         </h3>
 
         {/* Description */}
@@ -104,7 +110,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg border border-emerald-200/80 font-bold text-xs">
             <Users className="w-3.5 h-3.5 text-emerald-600" />
-            <span>👥 {room.activePeopleCount} students</span>
+            <span>👥 {room.activePeopleCount} users</span>
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
           </div>
 
@@ -128,7 +134,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({
 
       {/* Footer Note */}
       <div className="mt-2 text-[10px] text-slate-400 font-mono flex items-center justify-between">
-        <span>Campus Room • Active Discussion</span>
+        <span>Live Room • Active Discussion</span>
       </div>
     </div>
   );

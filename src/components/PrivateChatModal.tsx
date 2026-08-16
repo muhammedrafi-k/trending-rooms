@@ -14,6 +14,7 @@ interface PrivateChatModalProps {
   onSelectPartner: (username: string) => void;
   onDeleteMessage?: (messageId: string) => void;
   onClose: () => void;
+  isTabEmbed?: boolean;
 }
 
 export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
@@ -28,6 +29,7 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
   onSelectPartner,
   onDeleteMessage,
   onClose,
+  isTabEmbed = false,
 }) => {
   const [inputText, setInputText] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
@@ -99,62 +101,59 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
         (m.displayName && m.displayName.toLowerCase().includes(searchFilter.trim().toLowerCase())))
   );
 
-  return (
-    <div
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 animate-in fade-in overflow-y-auto"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full max-h-[85vh] sm:max-h-[90vh] h-[85vh] flex flex-col overflow-hidden shadow-2xl text-slate-100 my-auto">
-        
-        {/* HEADER */}
-        <div className="bg-slate-900 border-b border-slate-800 p-4 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            {partnerUsername && (
-              <button
-                onClick={() => onSelectPartner('')}
-                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
-                title="Back to conversation list"
-              >
-                <ArrowLeft className="w-4 h-4" />
-              </button>
-            )}
+  const innerContent = (
+    <div className={`bg-slate-900 border border-slate-800 rounded-3xl w-full flex flex-col overflow-hidden shadow-2xl text-slate-100 ${
+      isTabEmbed ? 'h-full flex-1' : 'max-w-2xl max-h-[85vh] sm:max-h-[90vh] h-[85vh] my-auto'
+    }`}>
+      
+      {/* HEADER */}
+      <div className="bg-slate-900 border-b border-slate-800 p-4 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-3">
+          {partnerUsername && (
+            <button
+              onClick={() => onSelectPartner('')}
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer"
+              title="Back to conversation list"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+          )}
 
-            <div className="flex items-center gap-2.5">
-              <div className="w-10 h-10 rounded-xl bg-orange-500/20 text-orange-400 border border-orange-500/30 flex items-center justify-center font-bold text-sm shrink-0">
-                {partnerUsername ? (cleanPartner === 'muhammedrafii2002' ? '👨‍💻' : partnerUsername.slice(0, 2).toUpperCase()) : '💬'}
-              </div>
-              <div>
-                <h3 className="font-extrabold text-white text-base flex items-center gap-1.5">
-                  {partnerUsername ? (
-                    <>
-                      <span>{cleanPartner === 'muhammedrafii2002' ? 'Developer (@developer)' : `@${partnerUsername}`}</span>
-                      {partnerBadge && (
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                          {partnerBadge}
-                        </span>
-                      )}
-                    </>
-                  ) : (
-                    <span>Direct Private Chats (1-on-1)</span>
-                  )}
-                </h3>
-                <p className="text-[11px] text-slate-400 flex items-center gap-1">
-                  <Lock className="w-3 h-3 text-emerald-400" />
-                  <span>Private & Encrypted Student Chat</span>
-                </p>
-              </div>
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-xl bg-orange-500/20 text-orange-400 border border-orange-500/30 flex items-center justify-center font-bold text-sm shrink-0">
+              {partnerUsername ? (cleanPartner === 'muhammedrafii2002' ? '👨‍💻' : partnerUsername.slice(0, 2).toUpperCase()) : '💬'}
+            </div>
+            <div>
+              <h3 className="font-extrabold text-white text-base flex items-center gap-1.5">
+                {partnerUsername ? (
+                  <>
+                    <span>{cleanPartner === 'muhammedrafii2002' ? 'Developer (@developer)' : `@${partnerUsername}`}</span>
+                    {partnerBadge && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        {partnerBadge}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span>Direct Private Chats (1-on-1)</span>
+                )}
+              </h3>
+              <p className="text-[11px] text-slate-400 flex items-center gap-1">
+                <Lock className="w-3 h-3 text-emerald-400" />
+                <span>Private & Encrypted User Chat</span>
+              </p>
             </div>
           </div>
-
-          <button
-            onClick={onClose}
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition"
-          >
-            <X className="w-5 h-5" />
-          </button>
         </div>
+
+        <button
+          onClick={onClose}
+          className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition cursor-pointer"
+          title="Close chat"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
 
         {/* MAIN BODY: VIEW CONVERSATIONS LIST OR CHAT FEED */}
         {!partnerUsername ? (
@@ -311,7 +310,7 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
             {filteredMembers.length > 0 && (
               <div>
                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
-                  All Campus Members ({filteredMembers.length})
+                  All Active Members ({filteredMembers.length})
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {filteredMembers.map((member) => {
@@ -511,6 +510,24 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
           </div>
         )}
       </div>
+  );
+
+  if (isTabEmbed) {
+    return (
+      <div className="w-full max-w-4xl mx-auto px-2 sm:px-4 h-[calc(100vh-140px)] min-h-[520px] flex flex-col animate-in fade-in duration-200">
+        {innerContent}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-40 bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 pb-20 animate-in fade-in overflow-y-auto"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      {innerContent}
     </div>
   );
 };

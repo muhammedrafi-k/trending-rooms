@@ -10,9 +10,9 @@ interface CreatePostModalProps {
 }
 
 const CATEGORIES: Array<{ id: PostCategory; label: string; icon: string }> = [
-  { id: 'fest', label: 'College Fest', icon: '🎉' },
+  { id: 'fest', label: 'Fest & Event', icon: '🎉' },
   { id: 'weather', label: 'Rain / Weather', icon: '🌧️' },
-  { id: 'traffic', label: 'Traffic / Bus Delay', icon: '🚍' },
+  { id: 'traffic', label: 'Traffic / Delay', icon: '🚍' },
   { id: 'incident', label: 'Incident / News', icon: '🚨' },
   { id: 'general', label: 'General Update', icon: '📢' },
 ];
@@ -78,7 +78,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
             <Radio className="w-5 h-5 text-orange-400 animate-pulse" />
             <div>
               <h2 className="text-base font-bold">Post Real-Time Update</h2>
-              <p className="text-xs text-slate-400">Share what is happening right now around {currentCollege.shortName}</p>
+              <p className="text-xs text-slate-400">Share what is happening right now</p>
             </div>
           </div>
           <button
@@ -141,7 +141,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
                 setError('');
                 setContent(e.target.value);
               }}
-              placeholder="e.g., Heavy rain near college bus stop! Or: Pro show sound check starting at main quadrangle stage..."
+              placeholder="e.g., Heavy rain near main bus stop! Or: Pro show sound check starting at main quadrangle stage..."
               className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-orange-500 focus:bg-white outline-none transition resize-none"
             />
           </div>

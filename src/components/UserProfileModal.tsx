@@ -26,7 +26,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const [username, setUsername] = useState(
     currentUser.username && currentUser.username !== 'guest'
       ? currentUser.username
-      : `student_${Math.floor(Math.random() * 8999 + 1000)}`
+      : `user_${Math.floor(Math.random() * 8999 + 1000)}`
   );
   const [displayName, setDisplayName] = useState(
     currentUser.displayName && currentUser.displayName !== 'Guest Visitor'
@@ -595,7 +595,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   <span>Public Handle & Private Password</span>
                 </div>
                 <p className="text-[11px] text-slate-600">
-                  Only your handle <strong className="text-slate-800">@{username || 'username'}</strong> is visible to other students.
+                  Only your handle <strong className="text-slate-800">@{username || 'username'}</strong> is visible to other users.
                 </p>
               </div>
 
@@ -668,7 +668,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     setError('');
                     setEmail(e.target.value);
                   }}
-                  placeholder="student@college.edu"
+                  placeholder="user@college.edu"
                   className={`w-full px-3.5 py-2 bg-slate-50 border rounded-xl text-xs font-medium focus:ring-2 outline-none transition ${
                     emailValidation.status === 'taken'
                       ? 'border-red-400 focus:ring-red-400'
@@ -746,7 +746,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     setError('');
                     setLoginIdentifier(e.target.value);
                   }}
-                  placeholder="@arjun_bsc or student@college.edu"
+                  placeholder="@arjun_bsc or user@college.edu"
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-orange-500 focus:bg-white outline-none transition"
                 />
               </div>

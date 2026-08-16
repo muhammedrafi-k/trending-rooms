@@ -170,7 +170,7 @@ export const UserDetailsModal: React.FC<UserDetailsModalProps> = ({
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                   <span className="text-xs font-bold text-slate-200">
-                    {profile.isAdmin ? 'Campus Admin & Dev' : 'Verified Campus Student'}
+                    {profile.isAdmin ? 'Campus Admin & Dev' : 'Verified Campus User'}
                   </span>
                 </div>
                 <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 border border-emerald-800/80 px-2 py-0.5 rounded-md">
@@ -247,7 +247,7 @@ export const UserDetailsModal: React.FC<UserDetailsModalProps> = ({
                   <span>This user does not exist</span>
                 </div>
                 <p className="text-[11px] text-rose-300/80 leading-relaxed">
-                  No registered student was found with the handle <strong className="text-white">@{cleanUsername || 'unknown'}</strong>. You cannot view profile details or initiate direct private chats with non-existent users.
+                  No registered user was found with the handle <strong className="text-white">@{cleanUsername || 'unknown'}</strong>. You cannot view profile details or initiate direct private chats with non-existent users.
                 </p>
               </div>
 

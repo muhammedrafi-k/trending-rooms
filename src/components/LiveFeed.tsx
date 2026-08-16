@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { FeedPost, FeedComment, PostCategory, CollegeInfo, UserProfile, TrendingRoom } from '../types';
 import {
   Radio,
-  ThumbsUp,
+  Zap,
   MessageSquare,
   MapPin,
   CheckCircle2,
@@ -15,12 +15,15 @@ import {
   Users,
   Trash2,
   Send,
-  Heart,
   CornerDownRight,
   X,
   MoreVertical,
   Flag,
   User,
+  Activity,
+  Sparkles,
+  ArrowUp,
+  Loader2,
 } from 'lucide-react';
 
 interface LiveFeedProps {
@@ -45,13 +48,15 @@ const CATEGORY_FILTERS: Array<{ id: PostCategory | 'all'; label: string; icon: s
   { id: 'all', label: 'All Live', icon: '⚡' },
   { id: 'fest', label: 'Fest', icon: '🎉' },
   { id: 'weather', label: 'Weather/Rain', icon: '🌧️' },
-  { id: 'traffic', label: 'Bus/Traffic', icon: '`🚍`' },
+  { id: 'traffic', label: 'Bus/Traffic', icon: '🚍' },
   { id: 'incident', label: 'Incidents/News', icon: '🚨' },
   { id: 'general', label: 'General', icon: '📢' },
 ];
 
+const POSTS_PER_PAGE = 12;
+
 export const LiveFeed: React.FC<LiveFeedProps> = ({
-  posts,
+  posts = [],
   trendingRooms = [],
   currentCollege,
   currentUser,
@@ -68,6 +73,13 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
   onSelectUser,
 }) => {
   const [selectedFilter, setSelectedFilter] = useState<PostCategory | 'all'>('all');
+  const [visiblePostsCount, setVisiblePostsCount] = useState<number>(POSTS_PER_PAGE);
+  const [visibleTrendingRoomsCount, setVisibleTrendingRoomsCount] = useState<number>(6);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  // Sentinel for infinite scroll
+  const bottomSentinelRef = useRef<HTMLDivElement>(null);
 
   // Expanded comments state
   const [expandedPostIds, setExpandedPostIds] = useState<string[]>([]);
@@ -77,13 +89,57 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
   // Reddit-style reply thread expansion state (commentId -> boolean)
   const [expandedReplyThreads, setExpandedReplyThreads] = useState<Record<string, boolean>>({});
 
-  // Who Liked My Post Modal State
+  // Who Zapped My Post Modal State
   const [viewingUpvotersPost, setViewingUpvotersPost] = useState<FeedPost | null>(null);
   const [openPostMenuId, setOpenPostMenuId] = useState<string | null>(null);
 
   // Input states
   const [commentInputMap, setCommentInputMap] = useState<Record<string, string>>({});
   const [replyingToMap, setReplyingToMap] = useState<Record<string, { commentId: string; username: string } | null>>({});
+
+  const filteredPosts = posts.filter((p) => {
+    if (selectedFilter === 'all') return true;
+    return p.category === selectedFilter;
+  });
+
+  // Infinite Scroll Trigger via IntersectionObserver (Scalable like X/Instagram for 1000+ posts)
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && visiblePostsCount < filteredPosts.length && !isLoadingMore) {
+          setIsLoadingMore(true);
+          setTimeout(() => {
+            setVisiblePostsCount((prev) => Math.min(prev + POSTS_PER_PAGE, filteredPosts.length));
+            setIsLoadingMore(false);
+          }, 250);
+        }
+      },
+      { threshold: 0.1, rootMargin: '200px' }
+    );
+
+    if (bottomSentinelRef.current) {
+      observer.observe(bottomSentinelRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, [visiblePostsCount, filteredPosts.length, isLoadingMore]);
+
+  // Track window scroll for Back-To-Top button
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.scrollY > 400) {
+        setShowScrollTop(true);
+      } else {
+        setShowScrollTop(false);
+      }
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const toggleReplyThread = (commentId: string) => {
     setExpandedReplyThreads((prev) => ({ ...prev, [commentId]: !prev[commentId] }));
@@ -144,11 +200,6 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
     });
   };
 
-  const filteredPosts = posts.filter((p) => {
-    if (selectedFilter === 'all') return true;
-    return p.category === selectedFilter;
-  });
-
   const getTimeAgo = (isoString: string) => {
     const diffMin = Math.max(1, Math.floor((Date.now() - new Date(isoString).getTime()) / (1000 * 60)));
     if (diffMin < 60) return `${diffMin}m ago`;
@@ -160,34 +211,55 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
   return (
     <div className="space-y-6">
       {/* Top Banner */}
-      <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 text-white rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden border border-slate-800">
-        <div className="absolute right-0 top-0 translate-x-12 -translate-y-12 w-64 h-64 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-zinc-950 text-white rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden border border-slate-800/80">
+        <div className="absolute right-0 top-0 translate-x-12 -translate-y-12 w-72 h-72 bg-gradient-to-br from-amber-500/15 via-orange-500/10 to-rose-500/15 rounded-full blur-3xl pointer-events-none" />
         
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 relative z-10">
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-orange-500/20 border border-orange-500/30 rounded-full text-orange-400 text-xs font-bold mb-3">
-              <Radio className="w-3.5 h-3.5 animate-pulse" />
-              <span>Real-Time Local Feed</span>
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-500/15 border border-amber-500/30 rounded-full text-amber-400 text-xs font-black mb-3">
+              <span className="text-sm">⚡</span>
+              <span>SPIKES LIVE PULSE</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
-              What is Happening Right Now
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center gap-2">
+              <span>Real-Time Broadcast Feed</span>
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-xl leading-relaxed">
-              Live updates, incidents, fest situations, and bus delays shared directly by nearby students in real-time.
+              Instant live updates, active discussions, event reports, and high-velocity community spikes loaded seamlessly in real-time.
             </p>
           </div>
 
           <button
             onClick={onOpenCreatePost}
-            className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-2xl text-xs sm:text-sm font-bold shadow-lg shadow-orange-500/25 active:scale-95 transition"
+            className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 hover:from-amber-600 hover:to-rose-700 text-white rounded-2xl text-xs sm:text-sm font-black shadow-lg shadow-orange-500/25 active:scale-95 transition cursor-pointer"
           >
+            <Plus className="w-4 h-4 stroke-[3]" />
+            <span>Post Live Update</span>
+          </button>
+        </div>
+
+        {/* Live Feed Stream Scale Indicator */}
+        <div className="mt-4 pt-4 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 font-mono">
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1.5 text-amber-400 font-bold">
+              <Activity className="w-3.5 h-3.5 animate-pulse" />
+              <span>{posts.length} Live Updates</span>
+            </span>
+            <span>•</span>
+            <span className="text-emerald-400 font-semibold">⚡ Infinite Stream Engine</span>
+          </div>
+          <span className="text-[11px] text-slate-500">
+            Loaded dynamically like X & Instagram
+          </span>
+        </div>
+      </div>
             <Plus className="w-4 h-4" />
             <span>Post Live Update</span>
           </button>
         </div>
       </div>
 
-      {/* TRENDING COLLEGE ROOMS WIDGET ON LIVE FEED */}
+      {/* SPARK / SPIKES WIDGET ON LIVE FEED */}
       {trendingRooms.length > 0 && (
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 text-white shadow-lg space-y-4">
           <div className="flex items-center justify-between">
@@ -197,20 +269,20 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
               </div>
               <div>
                 <h3 className="font-black text-base sm:text-lg text-white flex items-center gap-2">
-                  <span>🔥 Trending College Rooms</span>
+                  <span>⚡ Active Spikes</span>
                   <span className="px-2 py-0.5 rounded-md bg-orange-500/20 text-orange-400 text-[10px] font-bold border border-orange-500/30">
                     Live Now
                   </span>
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Hot discussion hubs
+                  Real-time discussion spikes
                 </p>
               </div>
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {trendingRooms.slice(0, 6).map((room) => (
+            {trendingRooms.slice(0, visibleTrendingRoomsCount).map((room) => (
               <div
                 key={room.id}
                 onClick={() => onSelectRoom?.(room.id)}
@@ -240,13 +312,27 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
                   </span>
 
                   <span className="text-orange-400 font-bold group-hover:translate-x-0.5 transition flex items-center gap-0.5">
-                    <span>Join Room</span>
+                    <span>Enter Spike</span>
                     <ArrowRight className="w-3 h-3" />
                   </span>
                 </div>
               </div>
             ))}
           </div>
+
+          {trendingRooms.length > visibleTrendingRoomsCount && (
+            <div className="pt-2 flex justify-center">
+              <button
+                onClick={() => setVisibleTrendingRoomsCount((prev) => prev + 6)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-orange-400 hover:text-orange-300 border border-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer active:scale-95"
+              >
+                <span>Load More Spikes</span>
+                <span className="text-[10px] bg-orange-500/20 px-2 py-0.5 rounded-full">
+                  {Math.min(visibleTrendingRoomsCount, trendingRooms.length)} of {trendingRooms.length}
+                </span>
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -258,7 +344,7 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
           </div>
           <h3 className="text-base font-bold text-slate-800">No live updates in this category</h3>
           <p className="text-xs text-slate-500 max-w-sm mx-auto">
-            Be the first witness to share what is happening around campus right now!
+            Be the first to share what is happening right now!
           </p>
           <button
             onClick={onOpenCreatePost}
@@ -270,7 +356,7 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredPosts.map((post) => {
+          {filteredPosts.slice(0, visiblePostsCount).map((post) => {
             const hasUpvoted = post.upvoters.includes(currentUser.username);
             const isAuthorOrAdmin = currentUser.username.toLowerCase() === post.authorUsername.toLowerCase() || currentUser.isAdmin;
             const isCommentsExpanded = expandedPostIds.includes(post.id);
@@ -283,7 +369,7 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
                 className="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md transition relative"
               >
                 <div className="p-5 sm:p-6 space-y-3.5">
-                  {/* Top Bar: Author, Verification Badge, Time, and 3-Dot Action Menu */}
+                  {/* Top Bar: Author, Time, and 3-Dot Action Menu */}
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2.5">
                       <button
@@ -301,11 +387,6 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
                           >
                             @{post.authorUsername}
                           </button>
-                          {post.authorBadge && (
-                            <span className="px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded-md text-[10px] font-bold">
-                              {post.authorBadge}
-                            </span>
-                          )}
                         </div>
                         <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
                           <span className="flex items-center gap-1 font-medium text-slate-600">
@@ -321,20 +402,8 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
                       </div>
                     </div>
 
-                    {/* Right side: Verification Badge & 3-Dot Options Dropdown */}
+                    {/* Right side: 3-Dot Options Dropdown */}
                     <div className="flex items-center gap-1.5 relative">
-                      {post.verificationStatus === 'verified' ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[11px] font-bold">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                          <span className="hidden sm:inline">Verified Live</span>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-[10px] font-bold">
-                          <AlertTriangle className="w-3 h-3 text-amber-600" />
-                          <span className="hidden sm:inline">Unverified</span>
-                        </span>
-                      )}
-
                       {/* 3-Dot Menu Button */}
                       <div className="relative">
                         <button
@@ -708,6 +777,20 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
               </div>
             );
           })}
+
+          {filteredPosts.length > visiblePostsCount && (
+            <div className="pt-2 pb-4 flex justify-center">
+              <button
+                onClick={() => setVisiblePostsCount((prev) => prev + 6)}
+                className="px-6 py-3 bg-white hover:bg-orange-50 border border-slate-200 hover:border-orange-300 text-orange-600 font-extrabold text-xs sm:text-sm rounded-2xl shadow-sm transition active:scale-95 flex items-center gap-2 cursor-pointer"
+              >
+                <span>Load More Live Updates</span>
+                <span className="text-[11px] bg-orange-100 text-orange-800 px-2 py-0.5 rounded-full font-bold">
+                  Showing {Math.min(visiblePostsCount, filteredPosts.length)} of {filteredPosts.length}
+                </span>
+              </button>
+            </div>
+          )}
         </div>
       )}
       {/* WHO LIKED MY POST MODAL */}

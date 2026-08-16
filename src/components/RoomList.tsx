@@ -17,7 +17,7 @@ interface RoomListProps {
 }
 
 export const RoomList: React.FC<RoomListProps> = ({
-  rooms,
+  rooms = [],
   currentCollege,
   currentUserUsername,
   isAdmin,
@@ -29,6 +29,7 @@ export const RoomList: React.FC<RoomListProps> = ({
 }) => {
   const [selectedFilter, setSelectedFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [visibleRoomsCount, setVisibleRoomsCount] = useState<number>(6);
   const [showJoinPrivateModal, setShowJoinPrivateModal] = useState(false);
   const [privateInput, setPrivateInput] = useState('');
   const [privateError, setPrivateError] = useState('');
@@ -106,7 +107,7 @@ export const RoomList: React.FC<RoomListProps> = ({
           <div className="flex flex-wrap items-center gap-2 mb-3">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-500/20 border border-orange-500/30 text-orange-300 text-xs font-extrabold">
               <Radio className="w-3.5 h-3.5 text-orange-400" />
-              <span>Campus Rooms</span>
+              <span>Live Rooms</span>
             </div>
 
             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs font-bold">
@@ -119,7 +120,7 @@ export const RoomList: React.FC<RoomListProps> = ({
             Live Rooms & Discussions
           </h2>
           <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-            Public rooms for discussions, private invite-only rooms, and real-time student polls. Join any room to chat live!
+            Public rooms for discussions, private invite-only rooms, and real-time user polls. Join any room to chat live!
           </p>
         </div>
       </div>
@@ -187,7 +188,7 @@ export const RoomList: React.FC<RoomListProps> = ({
       {/* Grid Title */}
       <div className="flex items-center justify-between">
         <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-          <span>{currentCollege.shortName} Rooms</span>
+          <span>Active Rooms</span>
           <span className="text-xs font-bold bg-orange-100 text-orange-800 px-2 py-0.5 rounded-full">
             {filteredRooms.length}
           </span>
@@ -204,7 +205,7 @@ export const RoomList: React.FC<RoomListProps> = ({
       {/* Grid of Rooms */}
       {filteredRooms.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredRooms.map((room) => {
+          {filteredRooms.slice(0, visibleRoomsCount).map((room) => {
             const isCreator = currentUserUsername && room.creatorUsername === currentUserUsername;
             const isJoined =
               isCreator ||
@@ -222,6 +223,20 @@ export const RoomList: React.FC<RoomListProps> = ({
               />
             );
           })}
+
+          {filteredRooms.length > visibleRoomsCount && (
+            <div className="pt-4 pb-2 flex justify-center col-span-full">
+              <button
+                onClick={() => setVisibleRoomsCount((prev) => prev + 6)}
+                className="px-6 py-3 bg-white hover:bg-orange-50 border border-slate-200 hover:border-orange-300 text-orange-600 font-extrabold text-xs sm:text-sm rounded-2xl shadow-sm transition active:scale-95 flex items-center gap-2 cursor-pointer"
+              >
+                <span>Load More Rooms</span>
+                <span className="text-[11px] bg-orange-100 text-orange-800 px-2 py-0.5 rounded-full font-bold">
+                  Showing {Math.min(visibleRoomsCount, filteredRooms.length)} of {filteredRooms.length}
+                </span>
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center max-w-md mx-auto my-8 space-y-3">
@@ -235,8 +250,8 @@ export const RoomList: React.FC<RoomListProps> = ({
           </h4>
           <p className="text-xs text-slate-500">
             {selectedFilter === 'joined'
-              ? 'Browse public rooms and click Join to participate in campus discussions!'
-              : `Be the first one to create a room for ${currentCollege.shortName}!`}
+              ? 'Browse public rooms and click Join to participate in live discussions!'
+              : 'Be the first one to create a room!'}
           </p>
           <button
             onClick={onOpenCreateRoom}

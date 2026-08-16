@@ -74,6 +74,7 @@ interface LiveRoomViewProps {
   onJoinRoom?: (roomId: string, codeInput?: string) => void;
   onLeaveRoom?: (roomId: string) => void;
   onDeleteRoom?: (roomId: string) => void;
+  onRequireRegistration?: (action: string) => void;
 }
 
 export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
@@ -101,6 +102,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
   onJoinRoom,
   onLeaveRoom,
   onDeleteRoom,
+  onRequireRegistration,
 }) => {
   const [inputText, setInputText] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -212,7 +214,8 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
   const isUserJoined =
     isCreator ||
     (Array.isArray(room.activeMembers) && room.activeMembers.some((u) => u.toLowerCase() === currentUser.username?.toLowerCase())) ||
-    (Array.isArray(room.allowedUsers) && room.allowedUsers.some((u) => u.toLowerCase() === currentUser.username?.toLowerCase()));
+    (Array.isArray(room.allowedUsers) && room.allowedUsers.some((u) => u.toLowerCase() === currentUser.username?.toLowerCase())) ||
+    (isLocallyUnlocked && room.isPrivate);
 
   const hasFullAccess =
     !room.isPrivate ||
@@ -325,6 +328,19 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
 
   const handleUnlockPrivateRoom = (e?: React.FormEvent, customCode?: string) => {
     if (e) e.preventDefault();
+
+    // Guest user restriction: Private rooms cannot be accessed by guest users
+    if (!currentUser.isRegistered || currentUser.username === 'guest') {
+      const guestErr = 'Guest access is restricted for private rooms. Please create an account or sign in to join.';
+      if (customCode !== undefined) {
+        setModalPasscodeError(guestErr);
+      } else {
+        setPrivateCodeError(guestErr);
+      }
+      onRequireRegistration?.('join private rooms with invite code');
+      return;
+    }
+
     const cleanInput = (customCode !== undefined ? customCode : privateCodeInput).trim().toUpperCase();
     const cleanInvite = (room.inviteCode || '').trim().toUpperCase();
 
@@ -469,16 +485,16 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
             <button
               onClick={onBack}
               className="p-1.5 sm:p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition shrink-0 cursor-pointer"
-              title="Back to campus rooms"
+              title="Back to rooms"
             >
               <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
 
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-base sm:text-xl shrink-0">{room.emoji}</span>
+                <span className="text-base sm:text-xl shrink-0">{room.emoji || '💬'}</span>
                 <h2 className="text-sm sm:text-lg font-extrabold text-white tracking-tight truncate">
-                  {room.title}
+                  {(room.title || '').replace(/^(\p{Emoji}|\uD83C[\uDF00-\uDFFF]|\uD83D[\uDC00-\uDE4F]|\uD83E[\uDD00-\uDDFF])\s*/u, '').trim() || room.title}
                 </h2>
                 
                 {/* Privacy Badge */}
@@ -800,7 +816,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
 
             <div className="space-y-2">
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 text-xs font-black">
-                <span>🔒 Private Campus Room</span>
+                <span>🔒 Private Room</span>
               </div>
               <h3 className="text-lg font-black text-white">
                 Access Code Required
@@ -813,37 +829,57 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
               </p>
             </div>
 
-            {/* Code Input Form */}
-            <form onSubmit={handleUnlockPrivateRoom} className="w-full space-y-3">
-              <div className="relative">
-                <input
-                  id="private-room-code-input"
-                  type="text"
-                  value={privateCodeInput}
-                  onChange={(e) => {
-                    setPrivateCodeInput(e.target.value);
-                    setPrivateCodeError('');
-                  }}
-                  placeholder="Enter Room Code (e.g. PRV-XXXXXX)"
-                  className="w-full px-4 py-3 bg-slate-950 border border-purple-500/40 rounded-2xl text-center text-sm font-mono font-bold tracking-widest text-amber-300 placeholder:text-slate-600 placeholder:tracking-normal placeholder:font-sans focus:outline-none focus:border-purple-400 shadow-inner uppercase"
-                />
-              </div>
-
-              {privateCodeError && (
-                <p className="text-xs font-bold text-red-400 flex items-center justify-center gap-1">
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  <span>{privateCodeError}</span>
+            {/* Guest Restricted Notice */}
+            {!currentUser.isRegistered || currentUser.username === 'guest' ? (
+              <div className="w-full bg-purple-950/40 border border-purple-500/30 rounded-2xl p-4 text-center space-y-3">
+                <div className="flex items-center justify-center gap-2 text-purple-300 text-xs font-bold">
+                  <Lock className="w-4 h-4 text-purple-400" />
+                  <span>Guest Access Restricted</span>
+                </div>
+                <p className="text-xs text-slate-300">
+                  Guest users cannot access private rooms with an invite code. Please register or log in to proceed.
                 </p>
-              )}
+                <button
+                  type="button"
+                  onClick={() => onRequireRegistration?.('join private rooms with invite code')}
+                  className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs rounded-2xl shadow-lg shadow-purple-600/30 transition cursor-pointer active:scale-95"
+                >
+                  Register / Log In to Unlock
+                </button>
+              </div>
+            ) : (
+              /* Code Input Form */
+              <form onSubmit={handleUnlockPrivateRoom} className="w-full space-y-3">
+                <div className="relative">
+                  <input
+                    id="private-room-code-input"
+                    type="text"
+                    value={privateCodeInput}
+                    onChange={(e) => {
+                      setPrivateCodeInput(e.target.value);
+                      setPrivateCodeError('');
+                    }}
+                    placeholder="Enter Room Code (e.g. PRV-XXXXXX)"
+                    className="w-full px-4 py-3 bg-slate-950 border border-purple-500/40 rounded-2xl text-center text-sm font-mono font-bold tracking-widest text-amber-300 placeholder:text-slate-600 placeholder:tracking-normal placeholder:font-sans focus:outline-none focus:border-purple-400 shadow-inner uppercase"
+                  />
+                </div>
 
-              <button
-                type="submit"
-                className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs rounded-2xl shadow-lg shadow-purple-600/30 transition cursor-pointer flex items-center justify-center gap-2 active:scale-95"
-              >
-                <Lock className="w-4 h-4" />
-                <span>Unlock & Join Room</span>
-              </button>
-            </form>
+                {privateCodeError && (
+                  <p className="text-xs font-bold text-red-400 flex items-center justify-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>{privateCodeError}</span>
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs rounded-2xl shadow-lg shadow-purple-600/30 transition cursor-pointer flex items-center justify-center gap-2 active:scale-95"
+                >
+                  <Lock className="w-4 h-4" />
+                  <span>Unlock & Join Room</span>
+                </button>
+              </form>
+            )}
 
             {/* Quick action to view members */}
             <button
@@ -887,7 +923,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                 </p>
                 <p className="text-[11px] text-slate-500">
                   {isUserJoined
-                    ? 'Say hello and start the campus conversation!'
+                    ? 'Say hello and start the conversation!'
                     : 'Click Join Room below to send the first message.'}
                 </p>
               </div>
@@ -1352,7 +1388,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
           {showImagePicker && (
             <div className="mb-3 p-3 bg-slate-800 rounded-2xl border border-slate-700 space-y-2">
               <div className="flex items-center justify-between text-xs text-slate-300 font-semibold">
-                <span>📸 Attach Campus Photo</span>
+                <span>📸 Attach Photo</span>
                 <button
                   type="button"
                   onClick={() => setShowImagePicker(false)}
@@ -1402,7 +1438,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                 <span>🕵️ Post Anonymously</span>
                 {isAnonymousMode && (
                   <span className="text-[10px] text-purple-400 font-mono">
-                    (Masked as 🕵️ Anon Student)
+                    (Masked as 🕵️ Anon User)
                   </span>
                 )}
               </span>
@@ -1440,7 +1476,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                 onChange={handleInputChange}
                 placeholder={
                   isAnonymousMode
-                    ? 'Posting anonymously (🕵️ Secret Student)...'
+                    ? 'Posting anonymously (🕵️ Secret User)...'
                     : `Chat live (type @ for mention)...`
                 }
                 className={`w-full text-slate-100 placeholder-slate-500 px-4 py-3 rounded-xl border focus:outline-none text-xs sm:text-sm ${
@@ -1504,7 +1540,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                 Join this room to send messages & participate
               </h4>
               <p className="text-[11px] text-slate-400">
-                Join to chat with campus students, share photos, and vote in live polls.
+                Join to chat with other users, share photos, and vote in live polls.
               </p>
             </div>
           </div>
@@ -1555,60 +1591,93 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
               </button>
             </div>
 
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleUnlockPrivateRoom(e, modalPasscodeInput);
-              }}
-              className="space-y-3 overflow-y-auto pr-1 flex-1 py-1"
-            >
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">
-                  Enter 6-Character Passcode
-                </label>
-                <div className="relative">
-                  <Key className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    required
-                    value={modalPasscodeInput}
-                    onChange={(e) => {
-                      setModalPasscodeError('');
-                      setModalPasscodeInput(e.target.value);
+            {!currentUser.isRegistered || currentUser.username === 'guest' ? (
+              <div className="space-y-4 py-2 text-center">
+                <div className="p-4 rounded-2xl bg-purple-950/40 border border-purple-500/30 space-y-2">
+                  <div className="flex items-center justify-center gap-2 text-purple-300 font-bold text-xs">
+                    <Lock className="w-4 h-4 text-purple-400" />
+                    <span>Guest Access Restricted</span>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    Guest users cannot access private rooms with an invite code. Please create a free account or sign in to join private discussions.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowPrivateUnlockModal(false)}
+                    className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPrivateUnlockModal(false);
+                      onRequireRegistration?.('join private rooms with invite code');
                     }}
-                    placeholder="e.g. PRV-8A2F91"
-                    className="w-full pl-9 pr-3 py-2 sm:py-2.5 rounded-xl bg-slate-800 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500 text-xs font-mono font-bold text-white placeholder-slate-500 uppercase"
-                    autoFocus
-                  />
+                    className="flex-1 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs shadow-md transition cursor-pointer active:scale-95"
+                  >
+                    Register / Sign In
+                  </button>
                 </div>
-                <p className="text-[10px] sm:text-[11px] text-slate-400 mt-1.5">
-                  This room is private. You must enter the exact host invite code to read messages and join.
-                </p>
               </div>
-
-              {modalPasscodeError && (
-                <div className="p-2.5 bg-red-950/40 border border-red-500/30 text-red-300 rounded-xl text-xs font-semibold">
-                  {modalPasscodeError}
+            ) : (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleUnlockPrivateRoom(e, modalPasscodeInput);
+                }}
+                className="space-y-3 overflow-y-auto pr-1 flex-1 py-1"
+              >
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">
+                    Enter 6-Character Passcode
+                  </label>
+                  <div className="relative">
+                    <Key className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      required
+                      value={modalPasscodeInput}
+                      onChange={(e) => {
+                        setModalPasscodeError('');
+                        setModalPasscodeInput(e.target.value);
+                      }}
+                      placeholder="e.g. PRV-8A2F91"
+                      className="w-full pl-9 pr-3 py-2 sm:py-2.5 rounded-xl bg-slate-800 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500 text-xs font-mono font-bold text-white placeholder-slate-500 uppercase"
+                      autoFocus
+                    />
+                  </div>
+                  <p className="text-[10px] sm:text-[11px] text-slate-400 mt-1.5">
+                    This room is private. You must enter the exact host invite code to read messages and join.
+                  </p>
                 </div>
-              )}
 
-              <div className="flex gap-2 pt-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setShowPrivateUnlockModal(false)}
-                  className="flex-1 py-2 sm:py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 transition cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2 sm:py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs shadow-md transition cursor-pointer active:scale-95 flex items-center justify-center gap-1.5"
-                >
-                  <Lock className="w-3.5 h-3.5" />
-                  <span>Unlock & Join</span>
-                </button>
-              </div>
-            </form>
+                {modalPasscodeError && (
+                  <div className="p-2.5 bg-red-950/40 border border-red-500/30 text-red-300 rounded-xl text-xs font-semibold">
+                    {modalPasscodeError}
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setShowPrivateUnlockModal(false)}
+                    className="flex-1 py-2 sm:py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-2 sm:py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs shadow-md transition cursor-pointer active:scale-95 flex items-center justify-center gap-1.5"
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Unlock & Join</span>
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
@@ -1703,7 +1772,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                     <Globe className="w-4 h-4 text-emerald-400 shrink-0" />
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-white truncate">Public</div>
-                      <div className="text-[9px] opacity-75 truncate">All campus</div>
+                      <div className="text-[9px] opacity-75 truncate">All users</div>
                     </div>
                   </button>
 
@@ -1738,7 +1807,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                   <option value="exam">📚 Exam & Academics</option>
                   <option value="bus">🚍 Bus & Travel</option>
                   <option value="placement">💼 Placement & Jobs</option>
-                  <option value="complaint">🚰 Campus Issues</option>
+                  <option value="complaint">🚰 Issues & Reports</option>
                   <option value="sports">🏆 Sports & Games</option>
                   <option value="general">💬 General Discussion</option>
                 </select>
@@ -1798,7 +1867,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                 </div>
                 <div>
                   <h3 className="font-extrabold text-xs sm:text-sm text-white">Share Room Join Link</h3>
-                  <p className="text-[10px] sm:text-[11px] text-slate-400">Invite students to join live</p>
+                  <p className="text-[10px] sm:text-[11px] text-slate-400">Invite users to join live</p>
                 </div>
               </div>
               <button
@@ -1822,7 +1891,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                     <span>🔒 Private Room</span>
                   </div>
                   <p className="text-[10px] sm:text-[11px] leading-relaxed text-purple-200/90">
-                    This is a private room. Only students with this exact invite link or code can join.
+                    This is a private room. Only users with this exact invite link or code can join.
                   </p>
                   {room.inviteCode && (
                     <div className="flex items-center justify-between bg-purple-900/60 p-2 rounded-xl border border-purple-700">
@@ -1839,7 +1908,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                     <span>🌐 Public Room</span>
                   </div>
                   <p className="text-[10px] sm:text-[11px] leading-relaxed text-emerald-200/90">
-                    This room is public. Anyone on campus can view and participate.
+                    This room is public. Anyone can view and participate.
                   </p>
                 </div>
               )}
@@ -2220,7 +2289,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                 </div>
                 <div>
                   <div className="text-xs font-bold text-slate-300">View User Profile</div>
-                  <div className="text-[10px] text-slate-400">Check college affiliation and badges</div>
+                  <div className="text-[10px] text-slate-400">Check profile details and badges</div>
                 </div>
               </button>
             </div>
@@ -2349,7 +2418,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
             </div>
             <div className="space-y-3 overflow-y-auto pr-1 flex-1 py-1">
               <p className="text-xs text-slate-400">
-                As Room Admin, explain why this campus room should be archived or removed:
+                As Room Admin, explain why this room should be archived or removed:
               </p>
               <textarea
                 value={deletionReasonInput}
@@ -2441,7 +2510,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
             <div className="text-center space-y-1.5 overflow-y-auto flex-1">
               <h3 className="font-extrabold text-sm sm:text-base text-white">Delete Room Permanently?</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Are you sure you want to delete <span className="text-orange-400 font-bold">"{room.title}"</span>? This will permanently remove the room, all live chat messages, and polls for all students.
+                Are you sure you want to delete <span className="text-orange-400 font-bold">"{room.title}"</span>? This will permanently remove the room, all live chat messages, and polls for all users.
               </p>
             </div>
 
