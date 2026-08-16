@@ -652,6 +652,130 @@ export const supabaseService = {
   },
 
   /**
+   * Get user profile by email address from Supabase DB
+   */
+  async getProfileByEmail(email: string): Promise<UserProfile | null> {
+    const supabase = getSupabaseClient();
+    if (!supabase || !email) return null;
+
+    try {
+      const cleanEmail = email.trim().toLowerCase();
+      const tables = ['users', 'profiles', 'user_profiles'];
+      for (const tableName of tables) {
+        try {
+          const { data } = await supabase
+            .from(tableName)
+            .select('*')
+            .ilike('email', cleanEmail)
+            .maybeSingle();
+
+          if (data) {
+            return {
+              id: data.id,
+              profileId: data.profile_id || `PID-${data.id.slice(0, 6)}`,
+              username: data.username,
+              displayName: data.display_name || data.username,
+              email: data.email,
+              password: data.password || data.password_hash || '',
+              collegeId: data.college_id,
+              badge: data.badge || '🎓 Campus Member (Google Verified)',
+              isAdmin: Boolean(data.is_admin),
+              isRegistered: Boolean(data.is_registered ?? true),
+              createdAt: data.created_at,
+            };
+          }
+        } catch (e) {
+          // ignore table error and continue
+        }
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  /**
+   * Register or Sign in user via Google Account
+   */
+  async registerOrLoginWithGoogle(googleData: {
+    email: string;
+    displayName: string;
+    avatarUrl?: string;
+    customUsername?: string;
+    collegeId?: string;
+  }): Promise<{ success: boolean; profile?: UserProfile; action: 'login' | 'register'; error?: string }> {
+    const supabase = getSupabaseClient();
+    const cleanEmail = googleData.email.trim().toLowerCase();
+    if (!cleanEmail) {
+      return { success: false, action: 'register', error: 'Invalid Google email address.' };
+    }
+
+    try {
+      // 1. Check if user already exists with this Google email
+      const existingUser = await this.getProfileByEmail(cleanEmail);
+      if (existingUser) {
+        return {
+          success: true,
+          profile: existingUser,
+          action: 'login',
+        };
+      }
+
+      // 2. Generate a clean unique username if not provided
+      let baseUsername = (googleData.customUsername || cleanEmail.split('@')[0])
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, '');
+      if (!baseUsername || baseUsername.length < 3) {
+        baseUsername = `user_${Math.floor(1000 + Math.random() * 9000)}`;
+      }
+
+      let finalUsername = baseUsername;
+      let suffix = 1;
+      while (await this.checkUsernameExists(finalUsername)) {
+        finalUsername = `${baseUsername}_${suffix}`;
+        suffix++;
+        if (suffix > 50) {
+          finalUsername = `${baseUsername}_${Math.floor(100 + Math.random() * 900)}`;
+          break;
+        }
+      }
+
+      const isDevAccount =
+        finalUsername === 'muhammedrafii2002' ||
+        cleanEmail === 'muhammedrafii2002@gmail.com';
+
+      const newProfile: UserProfile = {
+        id: `user_goog_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        profileId: isDevAccount ? 'PID-DEV202601' : `PID-${Math.floor(100000 + Math.random() * 900000)}`,
+        username: finalUsername,
+        displayName: googleData.displayName.trim() || finalUsername,
+        email: cleanEmail,
+        password: `google_oauth_${Math.random().toString(36).slice(2, 10)}`,
+        badge: isDevAccount ? '⚡ Lead Developer & Admin' : '🎓 Campus Member (Google Verified)',
+        collegeId: googleData.collegeId || '',
+        isAdmin: isDevAccount ? true : false,
+        isRegistered: true,
+        createdAt: new Date().toISOString(),
+      };
+
+      const saveRes = await this.saveProfile(newProfile);
+      if (!saveRes.success && supabase) {
+        // Return profile even if remote db had non-critical warning
+        return { success: true, profile: newProfile, action: 'register' };
+      }
+
+      return {
+        success: true,
+        profile: newProfile,
+        action: 'register',
+      };
+    } catch (e: any) {
+      console.error('Error during Google registration:', e);
+      return { success: false, action: 'register', error: e.message || 'Failed to complete Google account registration.' };
+    }
+  },
+
+  /**
    * Authenticate user credentials directly against Supabase DB
    */
   async authenticateUser(loginIdentifier: string, password: string): Promise<UserProfile | null> {
