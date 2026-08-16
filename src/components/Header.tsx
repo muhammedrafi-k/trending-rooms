@@ -1,18 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  Radio,
   Plus,
   Shield,
   Database,
-  Download,
   Bell,
   RefreshCw,
   Search,
   MoreVertical,
   Info,
-  MessageSquare,
-  HelpCircle,
-  Sparkles,
+  ShieldCheck,
+  Download,
 } from 'lucide-react';
 import { UserProfile } from '../types';
 
@@ -34,6 +31,7 @@ interface HeaderProps {
   onOpenDownloadModal?: () => void;
   onOpenSearchModal?: () => void;
   onOpenAboutUsModal?: () => void;
+  onOpenPrivacyPolicyModal?: () => void;
   onOpenContactUsModal?: () => void;
 }
 
@@ -51,7 +49,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenDownloadModal,
   onOpenSearchModal,
   onOpenAboutUsModal,
-  onOpenContactUsModal,
+  onOpenPrivacyPolicyModal,
 }) => {
   const [showDropdown, setShowDropdown] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -99,13 +97,13 @@ export const Header: React.FC<HeaderProps> = ({
               <p className="text-[9px] sm:text-[10px] font-semibold text-slate-500 tracking-wide uppercase flex items-center gap-1">
                 <span>Real-Time Pulse</span>
                 <span>•</span>
-                <span className="text-amber-600 font-bold">1000+ Nodes</span>
+                <span className="text-amber-600 font-bold">Live Community</span>
               </p>
             </div>
           </div>
 
-          {/* Right Header Actions: Search -> Notifications -> 3-Dot Menu -> Sync -> Dev -> Create */}
-          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+          {/* Right Header Actions: Search -> Notifications -> 3-Dot Menu -> Sync -> Create */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {/* Search Option (Profile lookup, post search, spike/room search) */}
             {onOpenSearchModal && (
               <button
@@ -136,7 +134,7 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
-            {/* Three-Dot Menu (Download App, About Us, Contact Us) */}
+            {/* Three-Dot Menu (ONLY: About Us and Privacy Policy) */}
             <div className="relative" ref={menuRef}>
               <button
                 type="button"
@@ -161,57 +159,53 @@ export const Header: React.FC<HeaderProps> = ({
                         setShowDropdown(false);
                         onOpenDownloadModal();
                       }}
-                      className="w-full px-3.5 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-orange-50 hover:text-orange-700 flex items-center gap-2.5 transition cursor-pointer"
+                      className="w-full px-3.5 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 hover:text-slate-900 flex items-center gap-2.5 transition cursor-pointer"
                     >
-                      <div className="w-6 h-6 rounded-lg bg-orange-100 text-orange-600 flex items-center justify-center shrink-0">
-                        <Download className="w-3.5 h-3.5" />
+                      <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
+                        <Download className="w-4 h-4" />
                       </div>
                       <div>
                         <span className="block font-bold">Download App</span>
-                        <span className="text-[10px] text-slate-400 font-normal">Install for mobile & desktop</span>
+                        <span className="text-[10px] text-slate-400 font-normal">Install on phone or desktop</span>
                       </div>
                     </button>
                   )}
 
                   {/* About Us */}
-                  {onOpenAboutUsModal && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowDropdown(false);
-                        onOpenAboutUsModal();
-                      }}
-                      className="w-full px-3.5 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 hover:text-slate-900 flex items-center gap-2.5 transition cursor-pointer"
-                    >
-                      <div className="w-6 h-6 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
-                        <Info className="w-3.5 h-3.5" />
-                      </div>
-                      <div>
-                        <span className="block font-bold">About Us</span>
-                        <span className="text-[10px] text-slate-400 font-normal">Learn about Spikes system</span>
-                      </div>
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowDropdown(false);
+                      onOpenAboutUsModal?.();
+                    }}
+                    className="w-full px-3.5 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 hover:text-slate-900 flex items-center gap-2.5 transition cursor-pointer"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
+                      <Info className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="block font-bold">About Us</span>
+                      <span className="text-[10px] text-slate-400 font-normal">Learn about Spikes</span>
+                    </div>
+                  </button>
 
-                  {/* Contact Us */}
-                  {onOpenContactUsModal && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowDropdown(false);
-                        onOpenContactUsModal();
-                      }}
-                      className="w-full px-3.5 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-purple-50 hover:text-purple-700 flex items-center gap-2.5 transition cursor-pointer"
-                    >
-                      <div className="w-6 h-6 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center shrink-0">
-                        <MessageSquare className="w-3.5 h-3.5" />
-                      </div>
-                      <div>
-                        <span className="block font-bold">Contact Us</span>
-                        <span className="text-[10px] text-slate-400 font-normal">Chat with developer</span>
-                      </div>
-                    </button>
-                  )}
+                  {/* Privacy Policy */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowDropdown(false);
+                      onOpenPrivacyPolicyModal?.();
+                    }}
+                    className="w-full px-3.5 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 hover:text-slate-900 flex items-center gap-2.5 transition cursor-pointer"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
+                      <ShieldCheck className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="block font-bold">Privacy Policy</span>
+                      <span className="text-[10px] text-slate-400 font-normal">Data & security guidelines</span>
+                    </div>
+                  </button>
                 </div>
               )}
             </div>
@@ -223,37 +217,10 @@ export const Header: React.FC<HeaderProps> = ({
                 onClick={onHardRefresh}
                 disabled={isRefreshing}
                 className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-bold transition flex items-center gap-1 active:scale-95 disabled:opacity-50 cursor-pointer"
-                title="Hard Refresh: Pull Fresh Data from Database"
+                title="Sync and refresh live data"
               >
                 <RefreshCw className={`w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-600 ${isRefreshing ? 'animate-spin text-orange-600' : ''}`} />
-                <span className="hidden lg:inline text-[11px]">Sync Data</span>
-              </button>
-            )}
-
-            {/* Supabase Integration Modal Trigger (Developer/Admin Only) */}
-            {onOpenSupabaseModal && currentUser.isAdmin && (
-              <button
-                type="button"
-                onClick={onOpenSupabaseModal}
-                className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold transition cursor-pointer"
-                title="Supabase PostgreSQL & Realtime Channel Status"
-              >
-                <Database className="w-3.5 h-3.5 text-emerald-600" />
-                <span className="hidden xl:inline">Supabase DB</span>
-              </button>
-            )}
-
-            {/* Developer / Admin Control Panel */}
-            {currentUser.isAdmin && (
-              <button
-                type="button"
-                onClick={onOpenAdminPanel}
-                className="flex items-center gap-1 px-2 py-1 sm:px-3 sm:py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white border border-purple-500 text-[11px] sm:text-xs font-black shadow-xs transition active:scale-95 cursor-pointer"
-                title="Developer Dashboard"
-              >
-                <Shield className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-200 fill-purple-400/30 animate-pulse shrink-0" />
-                <span className="hidden sm:inline">Dev Dashboard</span>
-                <span className="sm:hidden text-[10px]">Dev</span>
+                <span className="hidden lg:inline text-[11px]">Sync</span>
               </button>
             )}
 

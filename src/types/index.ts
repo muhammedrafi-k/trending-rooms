@@ -139,6 +139,8 @@ export interface TrendingRoom {
   roomAdmins?: string[]; // Usernames promoted by creator with admin permissions for this room
   roomAdminRights?: Record<string, RoomAdminRights>; // Granular rights per room admin
   pinnedMessageId?: string | null; // Pinned chat message ID
+  spikeVelocity?: number; // Real-time spike score (e.g. 10 to 999)
+  spikeLevel?: 'normal' | 'high' | 'critical' | 'extreme';
   deletionRequested?: boolean;
   deletionReason?: string;
   deletionRequestedBy?: string;
@@ -193,7 +195,7 @@ export interface FeedComment {
 
 export interface ReportItem {
   id: string;
-  targetType: 'room' | 'message' | 'post' | 'user';
+  targetType: 'room' | 'message' | 'post' | 'user' | 'comment';
   targetId: string;
   roomId?: string;
   reportedBy: string;

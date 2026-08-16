@@ -413,7 +413,7 @@ export const PrivateChatModal: React.FC<PrivateChatModalProps> = ({
                   <ShieldAlert className="w-5 h-5 text-rose-400 mx-auto" />
                   <p className="font-bold text-rose-200">User @{partnerUsername} does not exist</p>
                   <p className="text-[11px] text-rose-300/80">
-                    This username is not registered on the campus network. Sending messages to non-existent accounts is disabled.
+                    This username is not registered. Sending messages to non-existent accounts is disabled.
                   </p>
                 </div>
               )}

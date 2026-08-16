@@ -9,7 +9,7 @@ import {
   Users,
   Lock,
   MessageSquare,
-  Heart,
+  Zap,
   Clock,
   ArrowRight,
   Shield,
@@ -192,7 +192,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search profiles (@user), posts, or campus spikes..."
+              placeholder="Search profiles (@user), posts, or live rooms..."
               className="w-full bg-slate-900/90 text-white placeholder-slate-500 px-4 py-2.5 rounded-2xl border border-slate-700 focus:outline-none focus:border-orange-500 text-sm font-medium pr-10"
             />
             {query && (
@@ -428,8 +428,8 @@ export const SearchModal: React.FC<SearchModalProps> = ({
 
                     <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 text-[10px] text-slate-400">
                       <div className="flex items-center gap-3">
-                        <span className="flex items-center gap-1 text-red-400 font-semibold">
-                          <Heart className="w-3 h-3" />
+                        <span className="flex items-center gap-1 text-amber-400 font-semibold">
+                          <Zap className="w-3 h-3 fill-amber-400 text-amber-400" />
                           <span>{post.upvotes || 0}</span>
                         </span>
                         <span className="flex items-center gap-1 text-slate-400 font-semibold">
@@ -454,7 +454,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
               <div className="flex items-center justify-between text-xs font-black text-slate-400 uppercase tracking-wider px-1">
                 <span className="flex items-center gap-1.5">
                   <Radio className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Campus Spikes & Rooms ({filteredRooms.length})</span>
+                  <span>Live Spikes & Rooms ({filteredRooms.length})</span>
                 </span>
                 {activeFilter === 'all' && filteredRooms.length > 4 && (
                   <button

@@ -60,10 +60,10 @@ export const CollegeSelectorModal: React.FC<CollegeSelectorModalProps> = ({
             </div>
             <div>
               <h3 className="font-extrabold text-slate-900 text-base flex items-center gap-1.5">
-                <span>Select Your College Network</span>
+                <span>Select Your Network</span>
               </h3>
               <p className="text-xs text-slate-500">
-                Join campus-specific live rooms, polls & local event spikes
+                Join regional live rooms, polls & local event spikes
               </p>
             </div>
           </div>
@@ -84,7 +84,7 @@ export const CollegeSelectorModal: React.FC<CollegeSelectorModalProps> = ({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search college (e.g., SN Cherthala, SD Alappuzha, TKM, CET)..."
+              placeholder="Search region or community network..."
               className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
             />
           </div>
@@ -143,14 +143,14 @@ export const CollegeSelectorModal: React.FC<CollegeSelectorModalProps> = ({
 
           {filteredColleges.length === 0 && (
             <div className="text-center py-6 text-xs text-slate-500 space-y-2">
-              <p>No college found matching "{search}".</p>
+              <p>No community found matching "{search}".</p>
               <button
                 type="button"
                 onClick={() => setShowCustomForm(true)}
                 className="text-xs font-bold text-orange-600 hover:underline inline-flex items-center gap-1"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Add your College Network</span>
+                <span>Add your Community Network</span>
               </button>
             </div>
           )}
@@ -160,7 +160,7 @@ export const CollegeSelectorModal: React.FC<CollegeSelectorModalProps> = ({
         {showCustomForm ? (
           <form onSubmit={handleAddCustomCollege} className="pt-2 border-t border-slate-100 space-y-2">
             <label className="block text-xs font-bold text-slate-700">
-              Add Your Campus / Institution
+              Add Your Region / Network
             </label>
             <div className="flex gap-2">
               <input
@@ -168,7 +168,7 @@ export const CollegeSelectorModal: React.FC<CollegeSelectorModalProps> = ({
                 required
                 value={customCollegeName}
                 onChange={(e) => setCustomCollegeName(e.target.value)}
-                placeholder="e.g. St. Thomas College, Kozhencherry"
+                placeholder="e.g. Kerala Central, Cyberpark Hub"
                 className="flex-1 px-3 py-2 rounded-xl border border-slate-200 text-xs text-slate-800 focus:outline-none focus:border-orange-500"
               />
               <button
@@ -186,7 +186,7 @@ export const CollegeSelectorModal: React.FC<CollegeSelectorModalProps> = ({
               className="text-[11px] font-semibold text-slate-500 hover:text-orange-600 transition inline-flex items-center gap-1"
             >
               <Plus className="w-3 h-3" />
-              <span>Don't see your college? Add custom campus network</span>
+              <span>Don't see your network? Add custom network</span>
             </button>
           </div>
         )}

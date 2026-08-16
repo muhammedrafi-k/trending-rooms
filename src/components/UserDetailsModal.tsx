@@ -170,7 +170,7 @@ export const UserDetailsModal: React.FC<UserDetailsModalProps> = ({
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                   <span className="text-xs font-bold text-slate-200">
-                    {profile.isAdmin ? 'Campus Admin & Dev' : 'Verified Campus User'}
+                    {profile.isAdmin ? 'System Admin' : 'Verified Member'}
                   </span>
                 </div>
                 <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 border border-emerald-800/80 px-2 py-0.5 rounded-md">
@@ -194,7 +194,7 @@ export const UserDetailsModal: React.FC<UserDetailsModalProps> = ({
                   <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950/40 border border-slate-800">
                     <span className="text-slate-400 flex items-center gap-1.5">
                       <School className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Campus</span>
+                      <span>Region / Network</span>
                     </span>
                     <span className="font-semibold text-slate-200 uppercase">{profile.collegeId.replace(/_/g, ' ')}</span>
                   </div>
@@ -212,7 +212,7 @@ export const UserDetailsModal: React.FC<UserDetailsModalProps> = ({
                           month: 'short',
                           day: 'numeric',
                         })
-                      : 'Active Campus Member'}
+                      : 'Active Member'}
                   </span>
                 </div>
               </div>

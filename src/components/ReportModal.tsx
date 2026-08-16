@@ -3,7 +3,7 @@ import { AlertTriangle, X, Check, Shield } from 'lucide-react';
 import { ReportItem } from '../types';
 
 interface ReportModalProps {
-  targetType: 'room' | 'message' | 'post' | 'user';
+  targetType: 'room' | 'message' | 'post' | 'user' | 'comment';
   targetId: string;
   roomId?: string;
   reportedBy: string;
@@ -70,7 +70,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
           <div className="flex items-center gap-2.5">
             <AlertTriangle className="w-5 h-5 text-amber-300" />
             <h2 className="text-base font-bold">
-              Report {targetType === 'room' ? 'Room' : targetType === 'message' ? 'Message' : 'Post'}
+              Report {targetType === 'room' ? 'Room' : targetType === 'message' ? 'Message' : targetType === 'comment' ? 'Comment' : 'Post'}
             </h2>
           </div>
           <button onClick={onClose} className="p-1 text-red-100 hover:text-white transition">

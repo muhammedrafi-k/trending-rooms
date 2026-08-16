@@ -35,6 +35,8 @@ import { AppDownloadModal } from './components/AppDownloadModal';
 import { NotificationsModal } from './components/NotificationsModal';
 import { UserDetailsModal } from './components/UserDetailsModal';
 import { SearchModal } from './components/SearchModal';
+import { AboutUsModal } from './components/AboutUsModal';
+import { PrivacyPolicyModal } from './components/PrivacyPolicyModal';
 import { broadcastEngine } from './lib/broadcast';
 import { supabaseService } from './lib/supabaseService';
 
@@ -229,13 +231,15 @@ export default function App() {
   const [isUserProfileOpen, setIsUserProfileOpen] = useState(false);
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [isSupabaseDevOpen, setIsSupabaseDevOpen] = useState(false);
+  const [isAboutUsOpen, setIsAboutUsOpen] = useState(false);
+  const [isPrivacyPolicyOpen, setIsPrivacyPolicyOpen] = useState(false);
   const [requiredActionForProfile, setRequiredActionForProfile] = useState<string | undefined>(
     undefined
   );
 
   // Report Modal Target State
   const [reportTarget, setReportTarget] = useState<{
-    targetType: 'room' | 'message' | 'post' | 'user';
+    targetType: 'room' | 'message' | 'post' | 'user' | 'comment';
     targetId: string;
     roomId?: string;
     contentPreview?: string;
@@ -1391,8 +1395,23 @@ export default function App() {
     });
   };
 
+  const userCreatedRooms = useMemo(() => {
+    if (!currentUser.username || currentUser.username === 'guest') return [];
+    return rooms.filter(
+      (r) => r.creatorUsername && r.creatorUsername.toLowerCase() === currentUser.username.toLowerCase()
+    );
+  }, [rooms, currentUser.username]);
+
   const handleCreateRoom = (newRoom: TrendingRoom) => {
     requireRegistration('create discussion rooms', () => {
+      const activeUserRooms = rooms.filter(
+        (r) => r.creatorUsername && r.creatorUsername.toLowerCase() === currentUser.username.toLowerCase()
+      );
+      if (activeUserRooms.length >= 2) {
+        showToast('⚠️ Limit reached: You can create a maximum of 2 active rooms. Please request deletion of an existing room to launch a new one.', 'error');
+        return;
+      }
+
       const roomWithCreator: TrendingRoom = {
         ...newRoom,
         creatorUsername: currentUser.username,
@@ -1525,6 +1544,27 @@ export default function App() {
       return;
     }
     await supabaseService.likeFeedComment(commentId, currentUser.username);
+  };
+
+  const handleDeleteComment = async (postId: string, commentId: string) => {
+    requireRegistration('delete comments', async () => {
+      await supabaseService.deleteFeedComment(commentId, postId);
+      setPosts((prev) =>
+        prev.map((p) => (p.id === postId ? { ...p, commentsCount: Math.max(0, p.commentsCount - 1) } : p))
+      );
+      showToast('🗑️ Comment deleted successfully', 'info');
+    });
+  };
+
+  const handleReportComment = (comment: FeedComment, postId: string) => {
+    requireRegistration('report comments', () => {
+      setReportTarget({
+        targetType: 'comment',
+        targetId: comment.id,
+        roomId: postId,
+        contentPreview: comment.content,
+      });
+    });
   };
 
   const fetchCommentsForPost = async (postId: string): Promise<FeedComment[]> => {
@@ -2076,6 +2116,8 @@ export default function App() {
         onOpenNotifications={() => setIsNotificationsOpen(true)}
         onOpenDownloadModal={() => setIsDownloadModalOpen(true)}
         onOpenSearchModal={() => setIsSearchModalOpen(true)}
+        onOpenAboutUsModal={() => setIsAboutUsOpen(true)}
+        onOpenPrivacyPolicyModal={() => setIsPrivacyPolicyOpen(true)}
       />
 
       {/* Toast Notification Banner */}
@@ -2141,7 +2183,6 @@ export default function App() {
             onOpenCreatePost={() =>
               requireRegistration('post live updates', () => setIsCreatePostOpen(true))
             }
-            onOpenCreateRoomForPost={handleOpenCreateRoomForPost}
             onSelectRoom={(roomId) => {
               setCurrentRoomId(roomId);
               setActiveTab('rooms');
@@ -2161,6 +2202,8 @@ export default function App() {
             onDeletePost={handleDeletePost}
             onAddComment={handleAddComment}
             onLikeComment={handleLikeComment}
+            onDeleteComment={handleDeleteComment}
+            onReportComment={handleReportComment}
             fetchCommentsForPost={fetchCommentsForPost}
             onOpenPrivateChat={handleOpenPrivateChat}
             onSelectUser={(uname) => setViewingUserProfileUsername(uname)}
@@ -2205,6 +2248,8 @@ export default function App() {
             currentUserUsername={currentUser.username}
             isAdmin={currentUser.isAdmin}
             unlockedPrivateRoomIds={unlockedPrivateRoomIds}
+            userCreatedRooms={userCreatedRooms}
+            onRequestRoomDeletion={handleRequestRoomDeletion}
             onEnterRoom={handleEnterRoom}
             onOpenCreateRoom={() =>
               requireRegistration('create rooms', () => setIsCreateRoomOpen(true))
@@ -2303,6 +2348,10 @@ export default function App() {
       {isCreateRoomOpen && (
         <CreateEventModal
           currentCollege={currentCollege}
+          currentUserUsername={currentUser.username}
+          userCreatedRooms={userCreatedRooms}
+          onRequestRoomDeletion={handleRequestRoomDeletion}
+          onCancelRoomDeletionRequest={handleCancelRoomDeletionRequest}
           onClose={() => setIsCreateRoomOpen(false)}
           onCreateRoom={handleCreateRoom}
         />
@@ -2466,6 +2515,22 @@ export default function App() {
             setViewingUserProfileUsername(null);
             handleOpenPrivateChat(targetUsername);
           }}
+        />
+      )}
+
+      {/* About Us Modal */}
+      {isAboutUsOpen && (
+        <AboutUsModal
+          isOpen={isAboutUsOpen}
+          onClose={() => setIsAboutUsOpen(false)}
+        />
+      )}
+
+      {/* Privacy Policy Modal */}
+      {isPrivacyPolicyOpen && (
+        <PrivacyPolicyModal
+          isOpen={isPrivacyPolicyOpen}
+          onClose={() => setIsPrivacyPolicyOpen(false)}
         />
       )}
     </div>

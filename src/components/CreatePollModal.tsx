@@ -61,7 +61,7 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
             </div>
             <div>
               <h3 className="font-extrabold text-slate-900 text-base">
-                Create Campus Live Poll
+                Create Live Poll
               </h3>
               <p className="text-xs text-slate-500">
                 Users love voting! Get instant real-time feedback
@@ -87,7 +87,7 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
               required
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
-              placeholder="e.g. Is today's canteen biryani worth ₹70?"
+              placeholder="e.g. Which topic should we discuss next?"
               className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 text-sm text-slate-900 placeholder-slate-400 font-medium"
             />
           </div>
@@ -105,7 +105,7 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
                   value={opt}
                   onChange={(e) => handleOptionChange(idx, e.target.value)}
                   placeholder={`Option ${idx + 1} (e.g. ${
-                    idx === 0 ? '🔥 Worth it!' : idx === 1 ? '👎 Overpriced' : 'Option'
+                    idx === 0 ? '🔥 Option A' : idx === 1 ? '💡 Option B' : 'Option'
                   })`}
                   className="flex-1 px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:border-purple-500"
                 />
@@ -163,7 +163,7 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
               type="submit"
               className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-md transition"
             >
-              📊 Launch Campus Poll
+              📊 Launch Live Poll
             </button>
           </div>
         </form>

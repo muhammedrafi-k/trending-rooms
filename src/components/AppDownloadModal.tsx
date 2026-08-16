@@ -50,27 +50,27 @@ export const AppDownloadModal: React.FC<AppDownloadModalProps> = ({ onClose }) =
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl text-slate-100 relative my-auto max-h-[85vh] flex flex-col">
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl text-slate-100 relative my-auto max-h-[92dvh] sm:max-h-[88vh] flex flex-col">
         
         {/* Header visual */}
-        <div className="bg-gradient-to-tr from-orange-600 via-amber-500 to-orange-500 p-6 text-white text-center relative">
+        <div className="bg-gradient-to-tr from-orange-600 via-amber-500 to-orange-500 p-5 sm:p-6 text-white text-center relative shrink-0">
           <button
             onClick={onClose}
-            className="absolute top-4 right-4 p-2 rounded-xl bg-black/20 hover:bg-black/40 text-white transition"
+            className="absolute top-3.5 right-3.5 p-2 rounded-xl bg-black/20 hover:bg-black/40 text-white transition cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
 
-          <div className="w-16 h-16 rounded-2xl bg-white text-orange-600 font-black flex items-center justify-center text-3xl mx-auto shadow-xl shadow-orange-950/30 border-2 border-white/40 mb-3">
+          <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-white text-orange-600 font-black flex items-center justify-center text-2xl sm:text-3xl mx-auto shadow-xl shadow-orange-950/30 border-2 border-white/40 mb-2.5">
             🔥
           </div>
-          <h2 className="text-xl font-black tracking-tight">Download Trending Rooms App</h2>
-          <p className="text-xs text-orange-100 mt-1">
+          <h2 className="text-lg sm:text-xl font-black tracking-tight">Download Trending Rooms App</h2>
+          <p className="text-xs text-orange-100 mt-0.5">
             Install the Web App directly on your Phone or Desktop
           </p>
         </div>
 
-        <div className="p-6 space-y-5">
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
           {/* Status card */}
           {isInstalled ? (
             <div className="bg-emerald-950/80 border border-emerald-500/30 rounded-2xl p-4 flex items-center gap-3 text-emerald-300">
@@ -87,12 +87,12 @@ export const AppDownloadModal: React.FC<AppDownloadModalProps> = ({ onClose }) =
                 <span>Instant Installation (PWA / Android / iOS)</span>
               </div>
               <p className="text-xs text-slate-300 leading-relaxed">
-                Enjoy zero app store downloads, offline access, outside push notifications, and high-speed campus feeds.
+                Enjoy zero app store downloads, offline access, outside push notifications, and high-speed community feeds.
               </p>
 
               <button
                 onClick={handleInstallClick}
-                className="w-full py-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-orange-500/25 active:scale-95 transition flex items-center justify-center gap-2"
+                className="w-full py-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-orange-500/25 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Download className="w-4 h-4" />
                 <span>{deferredPrompt ? 'Install App Now' : 'Add to Mobile Home Screen'}</span>
@@ -101,14 +101,14 @@ export const AppDownloadModal: React.FC<AppDownloadModalProps> = ({ onClose }) =
           )}
 
           {/* Device Instructions */}
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
               Installation Guides by Device
             </h4>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {/* Android */}
-              <div className="bg-slate-950/80 border border-slate-800 p-3 rounded-2xl space-y-1.5">
+              <div className="bg-slate-950/80 border border-slate-800 p-3 rounded-2xl space-y-1">
                 <div className="flex items-center gap-1.5 font-bold text-xs text-emerald-400">
                   <Smartphone className="w-4 h-4" />
                   <span>Android (Chrome)</span>
@@ -119,7 +119,7 @@ export const AppDownloadModal: React.FC<AppDownloadModalProps> = ({ onClose }) =
               </div>
 
               {/* iOS */}
-              <div className="bg-slate-950/80 border border-slate-800 p-3 rounded-2xl space-y-1.5">
+              <div className="bg-slate-950/80 border border-slate-800 p-3 rounded-2xl space-y-1">
                 <div className="flex items-center gap-1.5 font-bold text-xs text-blue-400">
                   <Apple className="w-4 h-4" />
                   <span>iOS (Safari)</span>
@@ -134,7 +134,7 @@ export const AppDownloadModal: React.FC<AppDownloadModalProps> = ({ onClose }) =
           <div className="pt-2 border-t border-slate-800 text-center">
             <button
               onClick={onClose}
-              className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition"
+              className="w-full sm:w-auto px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition cursor-pointer"
             >
               Close
             </button>

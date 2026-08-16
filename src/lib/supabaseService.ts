@@ -239,20 +239,20 @@ export const supabaseService = {
       room_admin_rights: room.roomAdminRights || {},
       deletion_requested: room.deletionRequested || false,
       deletion_reason: room.deletionReason || null,
-      deletion_requested_by: room.deletionRequestedBy || room.creatorUsername || null,
       top_contributor: room.topContributor || null,
     };
 
     let { error } = await supabase.from('rooms').insert(payload);
 
     // Auto-recover if table has missing optional columns (e.g. PGRST204)
-    if (error && error.code === 'PGRST204') {
-      console.warn('PGRST204 missing column in rooms schema during insert:', error.message);
-      const match = error.message.match(/'([^']+)' column/);
+    while (error && error.code === 'PGRST204') {
+      const match = error.message?.match(/'([^']+)' column/);
       if (match && match[1] && payload[match[1]] !== undefined) {
         delete payload[match[1]];
         const retryRes = await supabase.from('rooms').insert(payload);
         error = retryRes.error;
+      } else {
+        break;
       }
     }
 
@@ -802,31 +802,19 @@ export const supabaseService = {
       if (updates.roomAdminRights !== undefined) payload.room_admin_rights = updates.roomAdminRights;
       if (updates.deletionRequested !== undefined) payload.deletion_requested = updates.deletionRequested;
       if (updates.deletionReason !== undefined) payload.deletion_reason = updates.deletionReason;
-      if (updates.deletionRequestedBy !== undefined) payload.deletion_requested_by = updates.deletionRequestedBy;
       if (updates.hasActivePoll !== undefined) payload.has_active_poll = updates.hasActivePoll;
 
       let { error } = await supabase.from('rooms').update(payload).eq('id', roomId);
 
       // Auto-recovery if database has missing optional columns (PGRST204)
-      if (error && error.code === 'PGRST204') {
-        console.warn('PGRST204 missing column in rooms schema during update, attempting auto-recovery:', error.message);
-        // Extract the missing column name if available
-        const match = error.message.match(/'([^']+)' column/);
+      while (error && error.code === 'PGRST204') {
+        const match = error.message?.match(/'([^']+)' column/);
         if (match && match[1] && payload[match[1]] !== undefined) {
           delete payload[match[1]];
           const retryRes = await supabase.from('rooms').update(payload).eq('id', roomId);
           error = retryRes.error;
         } else {
-          // Fallback to core guaranteed columns
-          const corePayload: any = {};
-          if (payload.title !== undefined) corePayload.title = payload.title;
-          if (payload.category !== undefined) corePayload.category = payload.category;
-          if (payload.emoji !== undefined) corePayload.emoji = payload.emoji;
-          if (payload.description !== undefined) corePayload.description = payload.description;
-          if (payload.location_area !== undefined) corePayload.location_area = payload.location_area;
-          if (payload.is_live_now !== undefined) corePayload.is_live_now = payload.is_live_now;
-          const retryRes = await supabase.from('rooms').update(corePayload).eq('id', roomId);
-          error = retryRes.error;
+          break;
         }
       }
 
@@ -1384,6 +1372,42 @@ export const supabaseService = {
       return !error;
     } catch (e) {
       return false;
+    }
+  },
+
+  /**
+   * Delete Feed Comment
+   */
+  async deleteFeedComment(commentId: string, postId: string): Promise<boolean> {
+    const supabase = getSupabaseClient();
+    if (!supabase) return true; // Local success fallback
+
+    try {
+      // Delete comment and its nested child replies
+      await supabase.from('feed_comments').delete().or(`id.eq.${commentId},parent_id.eq.${commentId}`);
+
+      // Decrement post comments count
+      try {
+        const { data: postData } = await supabase
+          .from('feed_posts')
+          .select('comments_count')
+          .eq('id', postId)
+          .single();
+
+        if (postData && (postData.comments_count || 0) > 0) {
+          await supabase
+            .from('feed_posts')
+            .update({ comments_count: Math.max(0, (postData.comments_count || 1) - 1) })
+            .eq('id', postId);
+        }
+      } catch (countErr) {
+        // Non-blocking
+      }
+
+      return true;
+    } catch (e) {
+      console.error('Error deleting feed comment from Supabase:', e);
+      return true;
     }
   },
 

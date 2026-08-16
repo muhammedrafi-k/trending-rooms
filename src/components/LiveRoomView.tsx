@@ -746,24 +746,85 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
           </div>
         </div>
 
-        {/* Room Info Bar */}
-        <div className="flex items-center justify-between text-[11px] text-slate-400 flex-wrap gap-2 pt-1 border-t border-slate-800/60">
-          <div className="flex items-center gap-3">
+        {/* Room Info & Quick Access Action Bar */}
+        <div className="flex items-center justify-between text-xs text-slate-400 flex-wrap gap-2 pt-2 border-t border-slate-800/80">
+          {/* Quick Access Action Chips */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {/* Active Members Button */}
+            <button
+              type="button"
+              onClick={() => setShowMembersModal(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 font-bold text-[11px] transition cursor-pointer active:scale-95"
+              title="View room members"
+            >
+              <Users className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{activeMembersList.length} Members</span>
+            </button>
+
+            {/* Create / View Poll Button */}
+            <button
+              type="button"
+              onClick={onOpenCreatePoll}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 font-bold text-[11px] transition cursor-pointer active:scale-95"
+              title="Create a live poll in room"
+            >
+              <BarChart2 className="w-3.5 h-3.5 text-purple-400" />
+              <span>Poll</span>
+            </button>
+
+            {/* Share Room Button */}
+            <button
+              type="button"
+              onClick={() => setShowShareModal(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white font-bold text-[11px] transition cursor-pointer active:scale-95"
+              title="Share room link or invite code"
+            >
+              <Share2 className="w-3.5 h-3.5 text-orange-400" />
+              <span className="hidden sm:inline">Share</span>
+            </button>
+
+            {/* Edit Room (Host/Admin) */}
+            {canUserEditRoom && (
+              <button
+                type="button"
+                onClick={handleOpenEditModal}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold text-[11px] transition cursor-pointer active:scale-95"
+                title="Edit room details"
+              >
+                <Settings className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">Edit</span>
+              </button>
+            )}
+
+            {/* Private Room Passcode quick badge for Host */}
+            {room.isPrivate && room.inviteCode && isCreator && (
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(room.inviteCode!);
+                  setCopiedLink(true);
+                  setTimeout(() => setCopiedLink(false), 2000);
+                }}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-purple-900/40 hover:bg-purple-900/60 border border-purple-500/40 text-purple-300 font-mono font-bold text-[11px] transition cursor-pointer"
+                title="Click to copy room code"
+              >
+                <Key className="w-3 h-3 text-purple-400" />
+                <span>{room.inviteCode}</span>
+                {copiedLink ? (
+                  <Check className="w-3 h-3 text-emerald-400" />
+                ) : (
+                  <span className="text-[9px] opacity-70">copy</span>
+                )}
+              </button>
+            )}
+          </div>
+
+          {/* Location & Relative Time */}
+          <div className="flex items-center gap-2.5 text-[11px]">
             <span className="flex items-center gap-1 text-slate-300 font-medium">
               <MapPin className="w-3 h-3 text-orange-400" />
               <span>{room.locationArea}</span>
             </span>
-
-            <button
-              onClick={() => setShowMembersModal(true)}
-              className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-emerald-950/40 border border-emerald-800/40 text-emerald-400 hover:text-emerald-300 hover:border-emerald-700/60 font-semibold transition cursor-pointer"
-            >
-              <Users className="w-3 h-3 text-emerald-400" />
-              <span>{activeMembersList.length} Members</span>
-            </button>
-          </div>
-
-          <div className="flex items-center gap-3">
             <span className="text-slate-500 font-mono">{expiry.label}</span>
           </div>
         </div>
