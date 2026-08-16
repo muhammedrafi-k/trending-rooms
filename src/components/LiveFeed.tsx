@@ -446,7 +446,9 @@ export const LiveFeed: React.FC<LiveFeedProps> = ({
             return (
               <div
                 key={post.id}
-                className="bg-white rounded-3xl border border-slate-200/90 shadow-xs hover:shadow-lg hover:border-amber-400/60 transition-all duration-200 relative overflow-hidden"
+                className={`bg-white rounded-3xl border border-slate-200/90 shadow-xs hover:shadow-lg hover:border-amber-400/60 transition-all duration-200 relative ${
+                  openPostMenuId === post.id ? 'z-30' : 'z-10'
+                }`}
               >
                 <div className="p-5 sm:p-6 space-y-3.5">
                   {/* Top Bar: Author, Location, Time, and 3-Dot Action Menu */}
