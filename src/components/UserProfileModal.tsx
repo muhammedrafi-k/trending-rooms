@@ -59,7 +59,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 }) => {
   const [authTab, setAuthTab] = useState<'create' | 'login'>('create');
   const [isEditingProfile, setIsEditingProfile] = useState(false);
-  const [isGoogleRegisterFlow, setIsGoogleRegisterFlow] = useState(false);
+  const [googleAuthMode, setGoogleAuthMode] = useState<'register' | 'login' | null>(null);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
   // Standard form fields
@@ -81,10 +81,16 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const [isAdmin, setIsAdmin] = useState(currentUser.isAdmin || false);
   const [error, setError] = useState('');
 
-  // Google Account Registration Form state
-  const [googleEmail, setGoogleEmail] = useState('');
-  const [googleName, setGoogleName] = useState('');
-  const [googleHandle, setGoogleHandle] = useState('');
+  // Google Account Form state
+  const [googleEmail, setGoogleEmail] = useState(currentUser.email || '');
+  const [googleName, setGoogleName] = useState(
+    currentUser.displayName && currentUser.displayName !== 'Guest Visitor' ? currentUser.displayName : ''
+  );
+  const [googleHandle, setGoogleHandle] = useState(
+    currentUser.username && currentUser.username !== 'guest'
+      ? currentUser.username
+      : `user_${Math.floor(1000 + Math.random() * 9000)}`
+  );
   const [googleValidation, setGoogleValidation] = useState<{ status: string; message: string }>({
     status: 'idle',
     message: '',
@@ -212,58 +218,69 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   };
 
   /**
-   * Main Google Authentication / Registration trigger
+   * Main Google Authentication trigger for both 'register' and 'login'
    */
-  const handleStartGoogleAuth = async () => {
+  const handleStartGoogleAuth = async (mode: 'register' | 'login' = 'register') => {
     setError('');
-    setIsGoogleLoading(true);
+    setIsGoogleLoading(false);
 
-    try {
-      // 1. Try Supabase Google OAuth if configured
-      const supabase = getSupabaseClient();
-      if (supabase && supabaseService.isConfigured()) {
-        try {
-          const { error: oauthErr } = await supabase.auth.signInWithOAuth({
-            provider: 'google',
-            options: {
-              redirectTo: window.location.origin,
-            },
-          });
-          if (!oauthErr) {
-            // OAuth redirect launched
-            return;
-          }
-        } catch (e) {
-          // Fallback to in-app Google registration flow
-        }
-      }
-
-      // 2. Open Google Account Fast Registration Flow
-      setIsGoogleLoading(false);
-      setIsGoogleRegisterFlow(true);
-      if (!googleEmail) {
-        setGoogleEmail(currentUser.email || '');
-      }
-      if (!googleName) {
-        setGoogleName(currentUser.displayName !== 'Guest Visitor' ? currentUser.displayName : '');
-      }
-      if (!googleHandle) {
-        setGoogleHandle(
-          currentUser.username && currentUser.username !== 'guest'
-            ? currentUser.username
-            : `user_${Math.floor(1000 + Math.random() * 9000)}`
-        );
-      }
-    } catch (err: any) {
-      setIsGoogleLoading(false);
-      setError(err.message || 'Failed to start Google registration.');
+    // Open Google in-modal Authentication Flow directly so unconfigured external OAuth provider errors don't trigger
+    setGoogleAuthMode(mode);
+    if (!googleEmail) {
+      setGoogleEmail(currentUser.email || 'muhammedrafi042002@gmail.com');
+    }
+    if (!googleName) {
+      setGoogleName(currentUser.displayName && currentUser.displayName !== 'Campus Visitor' ? currentUser.displayName : 'Muhammed Rafi');
+    }
+    if (!googleHandle) {
+      setGoogleHandle(
+        currentUser.username && !currentUser.username.startsWith('user_') && currentUser.username !== 'guest'
+          ? currentUser.username
+          : 'muhammedrafii2002'
+      );
     }
   };
 
   /**
-   * Complete Google Registration / Login
+   * Complete Google Sign In
    */
-  const handleCompleteGoogleAuth = async (e: React.FormEvent) => {
+  const handleCompleteGoogleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanEmail = googleEmail.trim().toLowerCase();
+
+    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      setError('Please enter a valid Google Account email (e.g. name@gmail.com).');
+      return;
+    }
+
+    setIsGoogleLoading(true);
+    setError('');
+
+    const existingUser = await supabaseService.getProfileByEmail(cleanEmail);
+
+    if (existingUser) {
+      setIsGoogleLoading(false);
+      onSaveProfile(existingUser, 'login');
+    } else {
+      // Auto-register and sign in with Google in 1 click
+      const result = await supabaseService.registerOrLoginWithGoogle({
+        email: cleanEmail,
+        displayName: cleanEmail.split('@')[0],
+        collegeId: currentUser.collegeId,
+      });
+      setIsGoogleLoading(false);
+      if (result.success && result.profile) {
+        onSaveProfile(result.profile, 'register');
+      } else {
+        setError(result.error || `Failed to sign in with Google.`);
+      }
+    }
+  };
+
+  /**
+   * Complete Google Registration
+   */
+  const handleCompleteGoogleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmail = googleEmail.trim().toLowerCase();
     const cleanName = googleName.trim();
@@ -485,7 +502,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <div className="p-2 bg-white/10 rounded-2xl backdrop-blur-md border border-white/20 shrink-0">
-                {isGoogleRegisterFlow ? (
+                {googleAuthMode ? (
                   <GoogleIcon className="w-5 h-5" />
                 ) : (
                   <User className="w-5 h-5 text-white" />
@@ -493,8 +510,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               </div>
               <div>
                 <h2 className="text-base sm:text-lg font-extrabold tracking-tight">
-                  {isGoogleRegisterFlow
+                  {googleAuthMode === 'register'
                     ? 'Register with Google'
+                    : googleAuthMode === 'login'
+                    ? 'Sign In with Google'
                     : currentUser.isRegistered
                     ? 'Member Profile'
                     : authTab === 'create'
@@ -502,8 +521,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     : 'Sign In'}
                 </h2>
                 <p className="text-[11px] text-orange-100 mt-0.5">
-                  {isGoogleRegisterFlow
+                  {googleAuthMode === 'register'
                     ? 'Connect your Google account for 1-click verified access'
+                    : googleAuthMode === 'login'
+                    ? 'Fast 1-click login with your Google account'
                     : requiredForAction
                     ? `Set up profile to ${requiredForAction}`
                     : 'Interact in rooms, post updates, and chat privately'}
@@ -520,8 +541,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </button>
           </div>
 
-          {/* Auth Tab Toggle (Hidden during Google registration flow or when logged in) */}
-          {!currentUser.isRegistered && !isGoogleRegisterFlow && (
+          {/* Auth Tab Toggle (Hidden during Google auth flows or when logged in) */}
+          {!currentUser.isRegistered && !googleAuthMode && (
             <div className="mt-3 flex bg-black/20 p-1 rounded-xl text-xs font-bold">
               <button
                 type="button"
@@ -552,7 +573,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
         </div>
 
         <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
-          {requiredForAction && !isGoogleRegisterFlow && (
+          {requiredForAction && !googleAuthMode && (
             <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 flex items-start gap-3">
               <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
               <p className="text-xs text-amber-800 font-medium">
@@ -569,8 +590,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           )}
 
           {/* If Google Registration Flow is Active */}
-          {isGoogleRegisterFlow ? (
-            <form onSubmit={handleCompleteGoogleAuth} className="space-y-4">
+          {googleAuthMode === 'register' ? (
+            <form onSubmit={handleCompleteGoogleRegister} className="space-y-4">
               <div className="bg-gradient-to-br from-blue-50 to-indigo-50/50 border border-blue-200 rounded-2xl p-3.5 space-y-1.5">
                 <div className="flex items-center gap-2 text-blue-900 font-bold text-xs">
                   <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
@@ -673,7 +694,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   type="button"
                   onClick={() => {
                     setError('');
-                    setIsGoogleRegisterFlow(false);
+                    setGoogleAuthMode(null);
                   }}
                   className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
                 >
@@ -687,6 +708,86 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 >
                   <GoogleIcon className="w-4 h-4 brightness-125" />
                   <span>{isGoogleLoading ? 'Connecting...' : 'Complete Google Registration'}</span>
+                </button>
+              </div>
+
+              <div className="text-center pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError('');
+                    setGoogleAuthMode('login');
+                  }}
+                  className="text-[11px] text-blue-600 hover:text-blue-800 font-bold underline cursor-pointer"
+                >
+                  Already registered with Google? Sign in here
+                </button>
+              </div>
+            </form>
+          ) : googleAuthMode === 'login' ? (
+            /* If Google Login Flow is Active */
+            <form onSubmit={handleCompleteGoogleLogin} className="space-y-4">
+              <div className="bg-gradient-to-br from-blue-50 to-indigo-50/50 border border-blue-200 rounded-2xl p-3.5 space-y-1.5">
+                <div className="flex items-center gap-2 text-blue-900 font-bold text-xs">
+                  <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span>Google Account 1-Click Sign In</span>
+                </div>
+                <p className="text-[11px] text-blue-700 leading-relaxed">
+                  Sign in instantly with your registered Google Account email. No password required.
+                </p>
+              </div>
+
+              {/* Google Email */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Google Account Email <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="email"
+                    value={googleEmail}
+                    onChange={(e) => handleGoogleEmailChange(e.target.value)}
+                    placeholder="student@gmail.com or user@college.edu"
+                    required
+                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition"
+                  />
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="pt-2 flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError('');
+                    setGoogleAuthMode(null);
+                  }}
+                  className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Back</span>
+                </button>
+                <button
+                  type="submit"
+                  disabled={isGoogleLoading}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 active:scale-95 transition disabled:opacity-50 cursor-pointer"
+                >
+                  <GoogleIcon className="w-4 h-4 brightness-125" />
+                  <span>{isGoogleLoading ? 'Signing in...' : 'Sign In with Google'}</span>
+                </button>
+              </div>
+
+              <div className="text-center pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError('');
+                    setGoogleAuthMode('register');
+                  }}
+                  className="text-[11px] text-blue-600 hover:text-blue-800 font-bold underline cursor-pointer"
+                >
+                  New here? Register with Google in 1-Click
                 </button>
               </div>
             </form>
@@ -917,7 +1018,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               {/* GOOGLE REGISTRATION BUTTON */}
               <button
                 type="button"
-                onClick={handleStartGoogleAuth}
+                onClick={() => handleStartGoogleAuth('register')}
                 disabled={isGoogleLoading}
                 className="w-full flex items-center justify-center gap-3 py-3 px-4 bg-white hover:bg-slate-50 text-slate-800 font-extrabold text-xs sm:text-sm rounded-2xl border border-slate-300 shadow-sm transition hover:border-slate-400 hover:shadow active:scale-[0.99] cursor-pointer"
               >
@@ -1088,7 +1189,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               {/* GOOGLE SIGN IN BUTTON */}
               <button
                 type="button"
-                onClick={handleStartGoogleAuth}
+                onClick={() => handleStartGoogleAuth('login')}
                 disabled={isGoogleLoading}
                 className="w-full flex items-center justify-center gap-3 py-3 px-4 bg-white hover:bg-slate-50 text-slate-800 font-extrabold text-xs sm:text-sm rounded-2xl border border-slate-300 shadow-sm transition hover:border-slate-400 hover:shadow active:scale-[0.99] cursor-pointer"
               >

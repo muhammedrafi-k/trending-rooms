@@ -39,6 +39,7 @@ import { AboutUsModal } from './components/AboutUsModal';
 import { PrivacyPolicyModal } from './components/PrivacyPolicyModal';
 import { broadcastEngine } from './lib/broadcast';
 import { supabaseService } from './lib/supabaseService';
+import { getSupabaseClient } from './lib/supabaseClient';
 
 export default function App() {
   // Navigation tab: 'feed' | 'rooms' | 'dms'
@@ -299,6 +300,53 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('CAMPUS_ACTIVE_USER_SESSION_V5', JSON.stringify(currentUser));
   }, [currentUser]);
+
+  // Listen for Supabase Google OAuth session state & redirects
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    if (!supabase || !supabaseService.isConfigured()) return;
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user?.email) {
+        supabaseService
+          .registerOrLoginWithGoogle({
+            email: session.user.email,
+            displayName:
+              session.user.user_metadata?.full_name ||
+              session.user.user_metadata?.name ||
+              session.user.email.split('@')[0],
+            collegeId: currentCollege.id,
+          })
+          .then((res) => {
+            if (res.success && res.profile && (!currentUser.isRegistered || currentUser.email !== res.profile.email)) {
+              handleSaveProfile(res.profile, res.action);
+            }
+          });
+      }
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session?.user?.email) {
+        const res = await supabaseService.registerOrLoginWithGoogle({
+          email: session.user.email,
+          displayName:
+            session.user.user_metadata?.full_name ||
+            session.user.user_metadata?.name ||
+            session.user.email.split('@')[0],
+          collegeId: currentCollege.id,
+        });
+        if (res.success && res.profile) {
+          handleSaveProfile(res.profile, res.action);
+        }
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [currentCollege.id]);
 
   // Supabase Data Initialization & Realtime Sync Effects
   useEffect(() => {
