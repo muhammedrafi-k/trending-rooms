@@ -1,7 +1,4 @@
--- ====================================================================
--- SUPABASE POSTGRESQL PRODUCTION SCHEMA FOR TRENDING ROOMS APP
--- Lead Developer: Muhammed Rafi (muhammedrafii2002@gmail.com)
--- ====================================================================
+
 
 -- 1. COLLEGES TABLE
 CREATE TABLE IF NOT EXISTS colleges (
@@ -214,13 +211,3 @@ EXCEPTION WHEN OTHERS THEN
   -- ignore publication error if table already in publication
 END $$;
 
--- ====================================================================
--- SEED DEFAULT CAMPUS DATA
--- ====================================================================
-INSERT INTO colleges (id, name, short_name, district, student_count, area, lat, lng)
-VALUES ('sn_cherthala', 'Sree Narayana College, Cherthala', 'SN College', 'Alappuzha', 2400, 'Cherthala Campus', 9.6842, 76.3312)
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO users (id, profile_id, username, display_name, email, password_hash, badge, is_admin, is_registered)
-VALUES ('dev-lead-2026', 'PID-990001', 'muhammedrafii2002', 'Muhammed Rafi (Lead Dev)', 'muhammedrafii2002@gmail.com', '!29042002@ifaR', '⚡ Lead Developer & Admin', TRUE, TRUE)
-ON CONFLICT (username) DO UPDATE SET email = 'muhammedrafii2002@gmail.com', password_hash = '!29042002@ifaR', is_admin = TRUE, badge = '⚡ Lead Developer & Admin';

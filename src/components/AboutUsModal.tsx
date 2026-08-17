@@ -116,7 +116,7 @@ export const AboutUsModal: React.FC<AboutUsModalProps> = ({
           <p className="text-[11px] text-slate-400 text-center sm:text-left flex items-center gap-1">
             <span>Powered with</span>
             <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-400 inline" />
-            <span>by Muhammed Rafi</span>
+            <span>by Spikes</span>
           </p>
 
           <div className="flex items-center gap-2 w-full sm:w-auto">

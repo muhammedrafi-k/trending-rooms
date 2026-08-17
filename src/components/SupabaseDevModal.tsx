@@ -46,7 +46,7 @@ NOTIFY pgrst, 'reload schema';
 `;
 
   const sqlSchema = `-- Supabase PostgreSQL Production Schema for Trending Rooms
--- Lead Developer: Muhammed Rafi (muhammedrafii2002@gmail.com)
+
 
 -- 1. COLLEGES TABLE
 CREATE TABLE IF NOT EXISTS colleges (
@@ -222,11 +222,7 @@ CREATE POLICY "Allow public read/write on private_messages" ON private_messages 
 CREATE POLICY "Allow public read/write on notifications" ON notifications FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public read/write on reports" ON reports FOR ALL USING (true) WITH CHECK (true);
 
--- 11. SEED DEFAULT LEAD DEVELOPER ACCOUNT
-INSERT INTO users (id, username, display_name, email, password_hash, badge, is_admin, is_registered)
-VALUES ('dev-lead-2026', 'muhammedrafii2002', 'Muhammed Rafi (Lead Dev)', 'muhammedrafii2002@gmail.com', '!29042002@ifaR', '⚡ Lead Developer & Admin', TRUE, TRUE)
-ON CONFLICT (username) DO UPDATE SET email = 'muhammedrafii2002@gmail.com', password_hash = '!29042002@ifaR', is_admin = TRUE, badge = '⚡ Lead Developer & Admin';
-`;
+
 
   const copySql = () => {
     navigator.clipboard.writeText(sqlSchema);
