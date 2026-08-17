@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, MessageSquare, Mail, Shield, Send, CheckCircle2, User, ExternalLink, Sparkles } from 'lucide-react';
+import { X, MessageSquare, Mail, Shield, Send, CheckCircle2 } from 'lucide-react';
 import { UserProfile } from '../types';
 
 interface ContactUsModalProps {
@@ -43,15 +43,15 @@ export const ContactUsModal: React.FC<ContactUsModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-3.5">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-purple-600/20">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-orange-600 to-amber-600 flex items-center justify-center text-white shadow-md shadow-orange-600/20">
               <Shield className="w-5 h-5 animate-pulse" />
             </div>
             <div>
               <h3 className="font-black text-slate-900 text-lg tracking-tight">
-                Contact & Developer Support
+                Help & Community Support
               </h3>
               <p className="text-xs text-slate-500">
-                Connect directly with the creator of Spikes
+                Connect with the moderation team and send feedback
               </p>
             </div>
           </div>
@@ -63,69 +63,47 @@ export const ContactUsModal: React.FC<ContactUsModalProps> = ({
           </button>
         </div>
 
-        {/* Developer Profile Card */}
-        <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 p-5 rounded-2xl text-white shadow-lg space-y-4">
+        {/* Support Info Card */}
+        <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950 p-5 rounded-2xl text-white shadow-lg space-y-4">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3.5">
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-orange-500 to-amber-500 flex items-center justify-center text-white font-black text-lg shadow-md border-2 border-white/20">
-                MR
+                🛡️
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h4 className="font-extrabold text-white text-base">Muhammed Rafi</h4>
-                  <span className="px-2 py-0.5 rounded-full bg-purple-500/30 text-purple-300 text-[10px] font-black border border-purple-400/40">
-                    Lead Developer
+                  <h4 className="font-extrabold text-white text-base">Campus Support Desk</h4>
+                  <span className="px-2 py-0.5 rounded-full bg-orange-500/30 text-orange-300 text-[10px] font-black border border-orange-400/40">
+                    Active
                   </span>
                 </div>
-                <p className="text-xs text-slate-300 font-mono">@muhammedrafii2002</p>
+                <p className="text-xs text-slate-300 font-mono">Community Moderation & Support</p>
               </div>
             </div>
           </div>
 
           <p className="text-xs text-slate-300 leading-relaxed">
-            Have questions, feedback, feature requests, or encountered an issue? Chat directly with the developer or drop an instant note.
+            Have questions, feedback, feature requests, or encountered an issue in a room? Submit a note directly below or reach out to campus support.
           </p>
-
-          <div className="pt-2 border-t border-slate-700/60 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                onStartChatWithDeveloper();
-              }}
-              className="flex-1 px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow-md transition flex items-center justify-center gap-2 cursor-pointer active:scale-95"
-            >
-              <MessageSquare className="w-4 h-4" />
-              <span>Chat with Developer</span>
-            </button>
-
-            <a
-              href="mailto:muhammedrafi042002@gmail.com"
-              className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition flex items-center justify-center gap-1.5"
-            >
-              <Mail className="w-4 h-4 text-orange-400" />
-              <span>Email Support</span>
-            </a>
-          </div>
         </div>
 
         {/* Quick Message Form */}
         <form onSubmit={handleSubmitFeedback} className="space-y-3 pt-1">
           <label className="block text-xs font-bold text-slate-700">
-            Send Quick Note / Feedback
+            Send Note / Feedback
           </label>
           <textarea
             rows={3}
             value={feedbackText}
             onChange={(e) => setFeedbackText(e.target.value)}
-            placeholder="Type your message, suggestion, or bug report here..."
+            placeholder="Type your message, suggestion, or feedback here..."
             className="w-full p-3 rounded-2xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-xs text-slate-800 placeholder-slate-400 resize-none font-medium"
           />
 
           {isSent && (
             <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>Message sent to developer successfully!</span>
+              <span>Feedback submitted successfully!</span>
             </div>
           )}
 
@@ -143,7 +121,7 @@ export const ContactUsModal: React.FC<ContactUsModalProps> = ({
               className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-bold text-xs shadow-sm transition flex items-center gap-1.5 cursor-pointer active:scale-95"
             >
               <Send className="w-3.5 h-3.5" />
-              <span>Send Message</span>
+              <span>Submit Feedback</span>
             </button>
           </div>
         </form>

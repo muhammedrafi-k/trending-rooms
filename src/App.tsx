@@ -301,53 +301,6 @@ export default function App() {
     localStorage.setItem('CAMPUS_ACTIVE_USER_SESSION_V5', JSON.stringify(currentUser));
   }, [currentUser]);
 
-  // Listen for Supabase Google OAuth session state & redirects
-  useEffect(() => {
-    const supabase = getSupabaseClient();
-    if (!supabase || !supabaseService.isConfigured()) return;
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user?.email) {
-        supabaseService
-          .registerOrLoginWithGoogle({
-            email: session.user.email,
-            displayName:
-              session.user.user_metadata?.full_name ||
-              session.user.user_metadata?.name ||
-              session.user.email.split('@')[0],
-            collegeId: currentCollege.id,
-          })
-          .then((res) => {
-            if (res.success && res.profile && (!currentUser.isRegistered || currentUser.email !== res.profile.email)) {
-              handleSaveProfile(res.profile, res.action);
-            }
-          });
-      }
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session?.user?.email) {
-        const res = await supabaseService.registerOrLoginWithGoogle({
-          email: session.user.email,
-          displayName:
-            session.user.user_metadata?.full_name ||
-            session.user.user_metadata?.name ||
-            session.user.email.split('@')[0],
-          collegeId: currentCollege.id,
-        });
-        if (res.success && res.profile) {
-          handleSaveProfile(res.profile, res.action);
-        }
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [currentCollege.id]);
-
   // Supabase Data Initialization & Realtime Sync Effects
   useEffect(() => {
     async function syncSupabaseData() {
@@ -484,7 +437,6 @@ export default function App() {
 
       // Check if user exists
       const isRegistered =
-        clean === 'muhammedrafii2002' ||
         clean === currentUser.username.toLowerCase() ||
         dbUsers.some((u) => u.username.toLowerCase() === clean);
 
@@ -534,7 +486,6 @@ export default function App() {
 
       // Verify recipient exists
       const isRegistered =
-        clean === 'muhammedrafii2002' ||
         clean === currentUser.username.toLowerCase() ||
         dbUsers.some((u) => u.username.toLowerCase() === clean);
 
@@ -2112,9 +2063,6 @@ export default function App() {
   const allCampusMembers = useMemo(() => {
     const map = new Map<string, { username: string; displayName?: string; badge?: string }>();
 
-    // Add Lead Dev
-    map.set('muhammedrafii2002', { username: 'muhammedrafii2002', displayName: 'Developer', badge: 'Lead Dev' });
-
     // Add registered users from database
     dbUsers.forEach((u) => {
       if (u.username && u.username !== 'guest' && u.username !== 'anonymous') {
@@ -2488,7 +2436,9 @@ export default function App() {
               prev.map((notif) => (notif.id === n.id ? { ...notif, isRead: true } : notif))
             );
             if (n.type === 'dm' || (n.fromUsername && !n.linkRoomId && !n.roomId)) {
-              handleOpenPrivateChat(n.fromUsername || 'muhammedrafii2002');
+              if (n.fromUsername) {
+                handleOpenPrivateChat(n.fromUsername);
+              }
             } else if (n.linkRoomId || n.roomId) {
               setCurrentRoomId(n.linkRoomId || n.roomId || null);
               setActiveTab('rooms');

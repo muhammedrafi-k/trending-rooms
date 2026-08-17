@@ -715,23 +715,6 @@ export const supabaseService = {
       }
     } catch (e) {}
 
-    // 2. Check developer accounts
-    if (cleanEmail === 'muhammedrafii2002@gmail.com' || cleanEmail === 'muhammedrafi042002@gmail.com') {
-      return {
-        id: 'dev-lead-2026',
-        profileId: 'PID-DEV202601',
-        username: 'muhammedrafii2002',
-        displayName: 'Muhammed Rafi',
-        email: cleanEmail,
-        password: '!29042002@ifaR',
-        collegeId: 'sn_cherthala',
-        badge: '⚡ Lead Developer & Admin',
-        isAdmin: true,
-        isRegistered: true,
-        createdAt: new Date().toISOString(),
-      };
-    }
-
     const supabase = getSupabaseClient();
     if (!supabase) return null;
 
@@ -754,7 +737,7 @@ export const supabaseService = {
               email: data.email,
               password: data.password || data.password_hash || '',
               collegeId: data.college_id,
-              badge: data.badge || '🎓 Campus Member (Google Verified)',
+              badge: data.badge || '🎓 Campus Member',
               isAdmin: Boolean(data.is_admin),
               isRegistered: Boolean(data.is_registered ?? true),
               createdAt: data.created_at,
@@ -771,79 +754,208 @@ export const supabaseService = {
   },
 
   /**
-   * Register or Sign in user via Google Account
+   * Request a 6-digit OTP to reset account password via Email
    */
-  async registerOrLoginWithGoogle(googleData: {
-    email: string;
-    displayName: string;
-    avatarUrl?: string;
-    customUsername?: string;
-    collegeId?: string;
-  }): Promise<{ success: boolean; profile?: UserProfile; action: 'login' | 'register'; error?: string }> {
-    const cleanEmail = googleData.email.trim().toLowerCase();
-    if (!cleanEmail) {
-      return { success: false, action: 'register', error: 'Invalid Google email address.' };
+  async requestPasswordResetOtp(identifier: string): Promise<{
+    success: boolean;
+    email?: string;
+    maskedEmail?: string;
+    username?: string;
+    error?: string;
+  }> {
+    const raw = identifier.trim().toLowerCase();
+    const cleanHandle = raw.replace(/^@/, '');
+    if (!raw) {
+      return { success: false, error: 'Please enter your registered username or email.' };
     }
 
     try {
-      // 1. Check if user already exists with this Google email
-      const existingUser = await this.getProfileByEmail(cleanEmail);
-      if (existingUser) {
+      // Find user profile
+      let user: UserProfile | null = null;
+      if (raw.includes('@')) {
+        user = await this.getProfileByEmail(raw);
+      }
+      if (!user) {
+        user = await this.getProfileByUsername(cleanHandle);
+      }
+
+      if (!user) {
         return {
-          success: true,
-          profile: existingUser,
-          action: 'login',
+          success: false,
+          error: `No account found for "${identifier}". Please check your username or email, or create a new profile.`,
         };
       }
 
-      // 2. Generate a clean unique username if not provided
-      let baseUsername = (googleData.customUsername || cleanEmail.split('@')[0])
-        .toLowerCase()
-        .replace(/[^a-z0-9_]/g, '');
-      if (!baseUsername || baseUsername.length < 3) {
-        baseUsername = `user_${Math.floor(1000 + Math.random() * 9000)}`;
+      const targetEmail = user.email || (raw.includes('@') ? raw : '');
+      if (!targetEmail || !targetEmail.includes('@')) {
+        return {
+          success: false,
+          error: 'This account does not have a registered email address on file for OTP verification.',
+        };
       }
 
-      let finalUsername = baseUsername;
-      let suffix = 1;
-      while (await this.checkUsernameExists(finalUsername)) {
-        finalUsername = `${baseUsername}_${suffix}`;
-        suffix++;
-        if (suffix > 50) {
-          finalUsername = `${baseUsername}_${Math.floor(100 + Math.random() * 900)}`;
-          break;
+      // Generate a secure 6-digit OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+      // Store in reset OTP store
+      try {
+        const stored = localStorage.getItem('CAMPUS_ACTIVE_PASSWORD_RESET_OTPS');
+        const otps = stored ? JSON.parse(stored) : {};
+        otps[user.username.toLowerCase()] = {
+          otp,
+          email: targetEmail,
+          username: user.username,
+          expiresAt,
+          createdAt: Date.now(),
+        };
+        otps[targetEmail.toLowerCase()] = {
+          otp,
+          email: targetEmail,
+          username: user.username,
+          expiresAt,
+          createdAt: Date.now(),
+        };
+        localStorage.setItem('CAMPUS_ACTIVE_PASSWORD_RESET_OTPS', JSON.stringify(otps));
+      } catch (e) {}
+
+      // Dispatch real email via Supabase Auth services if connected
+      const supabase = getSupabaseClient();
+      if (supabase && targetEmail) {
+        try {
+          await supabase.auth.resetPasswordForEmail(targetEmail, {
+            redirectTo: window.location.origin,
+          });
+        } catch (e) {
+          // Ignore
+        }
+        try {
+          await supabase.auth.signInWithOtp({
+            email: targetEmail,
+            options: { shouldCreateUser: false },
+          });
+        } catch (e) {
+          // Ignore
         }
       }
 
-      const isDevAccount =
-        finalUsername === 'muhammedrafii2002' ||
-        cleanEmail === 'muhammedrafii2002@gmail.com' ||
-        cleanEmail === 'muhammedrafi042002@gmail.com';
-
-      const newProfile: UserProfile = {
-        id: `user_goog_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-        profileId: isDevAccount ? 'PID-DEV202601' : `PID-${Math.floor(100000 + Math.random() * 900000)}`,
-        username: finalUsername,
-        displayName: googleData.displayName.trim() || finalUsername,
-        email: cleanEmail,
-        password: `google_oauth_${Math.random().toString(36).slice(2, 10)}`,
-        badge: isDevAccount ? '⚡ Lead Developer & Admin' : '🎓 Campus Member (Google Verified)',
-        collegeId: googleData.collegeId || '',
-        isAdmin: isDevAccount ? true : false,
-        isRegistered: true,
-        createdAt: new Date().toISOString(),
-      };
-
-      await this.saveProfile(newProfile);
+      // Create masked email e.g. "m***2@gmail.com"
+      const [localPart, domain] = targetEmail.split('@');
+      const maskedLocal =
+        localPart.length > 2
+          ? `${localPart[0]}${'*'.repeat(Math.min(4, localPart.length - 2))}${localPart[localPart.length - 1]}`
+          : `${localPart[0]}*`;
+      const maskedEmail = `${maskedLocal}@${domain}`;
 
       return {
         success: true,
-        profile: newProfile,
-        action: 'register',
+        email: targetEmail,
+        maskedEmail,
+        username: user.username,
       };
     } catch (e: any) {
-      console.error('Error during Google registration:', e);
-      return { success: false, action: 'register', error: e.message || 'Failed to complete Google account registration.' };
+      console.error('Password reset request error:', e);
+      return { success: false, error: e.message || 'Failed to initiate password reset.' };
+    }
+  },
+
+  /**
+   * Verify OTP and set a new password for the account
+   */
+  async verifyOtpAndResetPassword(
+    identifier: string,
+    otpInput: string,
+    newPassword: string
+  ): Promise<{ success: boolean; profile?: UserProfile; error?: string }> {
+    const raw = identifier.trim().toLowerCase();
+    const cleanHandle = raw.replace(/^@/, '');
+    const cleanOtp = otpInput.trim();
+    const cleanPass = newPassword.trim();
+
+    if (!raw) {
+      return { success: false, error: 'Identifier is missing.' };
+    }
+    if (!cleanOtp || cleanOtp.length !== 6) {
+      return { success: false, error: 'Please enter a valid 6-digit OTP code.' };
+    }
+    if (!cleanPass || cleanPass.length < 4) {
+      return { success: false, error: 'New password must be at least 4 characters long.' };
+    }
+
+    try {
+      // Validate OTP
+      let storedRecord: any = null;
+      try {
+        const stored = localStorage.getItem('CAMPUS_ACTIVE_PASSWORD_RESET_OTPS');
+        if (stored) {
+          const otps = JSON.parse(stored);
+          storedRecord = otps[raw] || otps[cleanHandle];
+        }
+      } catch (e) {}
+
+      if (!storedRecord) {
+        return {
+          success: false,
+          error: 'No active OTP request found. Please request a new OTP code.',
+        };
+      }
+
+      if (Date.now() > storedRecord.expiresAt) {
+        return {
+          success: false,
+          error: 'This OTP code has expired (valid for 10 minutes). Please request a new one.',
+        };
+      }
+
+      if (storedRecord.otp !== cleanOtp) {
+        return {
+          success: false,
+          error: 'Invalid OTP code. Please check the code sent to your email.',
+        };
+      }
+
+      // Fetch user profile to update
+      let user: UserProfile | null = null;
+      if (storedRecord.username) {
+        user = await this.getProfileByUsername(storedRecord.username);
+      }
+      if (!user && storedRecord.email) {
+        user = await this.getProfileByEmail(storedRecord.email);
+      }
+
+      if (!user) {
+        return { success: false, error: 'Account profile could not be found to update.' };
+      }
+
+      // Update password
+      const updatedProfile: UserProfile = {
+        ...user,
+        password: cleanPass,
+      };
+
+      // Save to Supabase and cache
+      await this.saveProfile(updatedProfile);
+
+      // Clean up OTP record
+      try {
+        const stored = localStorage.getItem('CAMPUS_ACTIVE_PASSWORD_RESET_OTPS');
+        if (stored) {
+          const otps = JSON.parse(stored);
+          delete otps[raw];
+          delete otps[cleanHandle];
+          if (user.username) delete otps[user.username.toLowerCase()];
+          if (user.email) delete otps[user.email.toLowerCase()];
+          localStorage.setItem('CAMPUS_ACTIVE_PASSWORD_RESET_OTPS', JSON.stringify(otps));
+        }
+      } catch (e) {}
+
+      return {
+        success: true,
+        profile: updatedProfile,
+      };
+    } catch (e: any) {
+      console.error('Error verifying OTP and resetting password:', e);
+      return { success: false, error: e.message || 'Failed to reset password.' };
     }
   },
 
@@ -859,32 +971,6 @@ export const supabaseService = {
       const cleanEmail = rawInput.includes('@') ? rawInput : '';
       const cleanUsername = rawInput.includes('@') ? rawInput.split('@')[0] : cleanHandle;
       const cleanPass = password.trim();
-
-      // Check if developer account login attempt
-      const isDevAttempt =
-        (cleanHandle === 'muhammedrafii2002' ||
-          cleanEmail === 'muhammedrafii2002@gmail.com' ||
-          cleanEmail === 'muhammedrafi042002@gmail.com' ||
-          cleanHandle === 'developer') &&
-        cleanPass === '!29042002@ifaR';
-
-      if (isDevAttempt) {
-        const devProfile: UserProfile = {
-          id: 'dev-lead-2026',
-          profileId: 'PID-DEV202601',
-          username: 'muhammedrafii2002',
-          displayName: 'Muhammed Rafi',
-          email: 'muhammedrafii2002@gmail.com',
-          password: '!29042002@ifaR',
-          collegeId: 'sn_cherthala',
-          badge: '⚡ Lead Developer & Admin',
-          isRegistered: true,
-          isAdmin: true,
-          createdAt: new Date().toISOString(),
-        };
-        await this.saveProfile(devProfile);
-        return devProfile;
-      }
 
       // Check local cache first
       try {

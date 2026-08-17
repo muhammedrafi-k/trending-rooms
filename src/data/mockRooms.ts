@@ -113,7 +113,7 @@ export function generateHighScaleRooms(targetCount: number = 1000, collegeId: st
       creatorName: creatorUser.replace('_', ' ').toUpperCase(),
       creatorUsername: creatorUser,
       roomAdmins: [creatorUser],
-      activeMembers: [creatorUser, 'muhammedrafii2002'],
+      activeMembers: [creatorUser],
       spikeVelocity: velocityScore,
       spikeLevel: velocityScore > 90 ? 'critical' : (velocityScore > 75 ? 'high' : 'normal'),
       topContributor: {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, UserX, MessageSquare, School, Calendar, CheckCircle2, AlertCircle, Hash, ShieldAlert } from 'lucide-react';
+import { X, UserX, MessageSquare, School, Calendar, CheckCircle2, Hash, ShieldAlert } from 'lucide-react';
 import { UserProfile } from '../types';
 import { supabaseService } from '../lib/supabaseService';
 
@@ -25,20 +25,6 @@ export const UserDetailsModal: React.FC<UserDetailsModalProps> = ({
     if (isInvalidUsername) return null;
     if (cachedUser && cachedUser.username.toLowerCase() === cleanUsername) return cachedUser;
     if (currentUser && currentUser.username.toLowerCase() === cleanUsername) return currentUser;
-    if (cleanUsername === 'muhammedrafii2002') {
-      return {
-        id: 'dev-muhammedrafii2002',
-        profileId: 'PID-DEV-001',
-        username: 'muhammedrafii2002',
-        displayName: 'Developer',
-        email: 'muhammedrafii2002@gmail.com',
-        collegeId: 'sn_cherthala',
-        badge: '⚡ Lead Developer & Admin',
-        isAdmin: true,
-        isRegistered: true,
-        createdAt: '2026-01-01T00:00:00Z',
-      };
-    }
     return null;
   });
   const [loading, setLoading] = useState<boolean>(!profile && !isInvalidUsername);
@@ -62,22 +48,6 @@ export const UserDetailsModal: React.FC<UserDetailsModalProps> = ({
         setLoading(false);
         return;
       }
-      if (cleanUsername === 'muhammedrafii2002') {
-        setProfile({
-          id: 'dev-muhammedrafii2002',
-          profileId: 'PID-DEV-001',
-          username: 'muhammedrafii2002',
-          displayName: 'Developer',
-          email: 'muhammedrafii2002@gmail.com',
-          collegeId: 'sn_cherthala',
-          badge: '⚡ Lead Developer & Admin',
-          isAdmin: true,
-          isRegistered: true,
-          createdAt: '2026-01-01T00:00:00Z',
-        });
-        setLoading(false);
-        return;
-      }
 
       setLoading(true);
       const user = await supabaseService.getProfileByUsername(cleanUsername);
@@ -85,7 +55,6 @@ export const UserDetailsModal: React.FC<UserDetailsModalProps> = ({
         if (user) {
           setProfile(user);
         } else {
-          // User does not exist in database. Do NOT generate fake profiles!
           setProfile(null);
         }
         setLoading(false);

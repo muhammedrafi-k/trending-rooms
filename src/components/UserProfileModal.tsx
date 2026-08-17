@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { UserProfile } from '../types';
 import { supabaseService } from '../lib/supabaseService';
-import { getSupabaseClient } from '../lib/supabaseClient';
 import {
   User,
   Shield,
@@ -14,31 +13,11 @@ import {
   X,
   CheckCircle2,
   XCircle,
-  Sparkles,
   ArrowLeft,
   Mail,
+  RefreshCw,
+  Sparkles,
 } from 'lucide-react';
-
-const GoogleIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
-  <svg className={className} viewBox="0 0 24 24">
-    <path
-      fill="#4285F4"
-      d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
-    />
-    <path
-      fill="#34A853"
-      d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.34 24 12 24z"
-    />
-    <path
-      fill="#FBBC05"
-      d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.98 0 12s.45 3.82 1.25 5.42l4.03-3.15z"
-    />
-    <path
-      fill="#EA4335"
-      d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
-    />
-  </svg>
-);
 
 interface UserProfileModalProps {
   currentUser: UserProfile;
@@ -57,10 +36,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   onOpenAdminPanel,
   requiredForAction,
 }) => {
-  const [authTab, setAuthTab] = useState<'create' | 'login'>('create');
+  const [authTab, setAuthTab] = useState<'create' | 'login' | 'forgot_password'>('create');
   const [isEditingProfile, setIsEditingProfile] = useState(false);
-  const [googleAuthMode, setGoogleAuthMode] = useState<'register' | 'login' | null>(null);
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
   // Standard form fields
   const [username, setUsername] = useState(
@@ -80,21 +57,17 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const [loginPassword, setLoginPassword] = useState('');
   const [isAdmin, setIsAdmin] = useState(currentUser.isAdmin || false);
   const [error, setError] = useState('');
+  const [successInfo, setSuccessInfo] = useState('');
 
-  // Google Account Form state
-  const [googleEmail, setGoogleEmail] = useState(currentUser.email || '');
-  const [googleName, setGoogleName] = useState(
-    currentUser.displayName && currentUser.displayName !== 'Guest Visitor' ? currentUser.displayName : ''
-  );
-  const [googleHandle, setGoogleHandle] = useState(
-    currentUser.username && currentUser.username !== 'guest'
-      ? currentUser.username
-      : `user_${Math.floor(1000 + Math.random() * 9000)}`
-  );
-  const [googleValidation, setGoogleValidation] = useState<{ status: string; message: string }>({
-    status: 'idle',
-    message: '',
-  });
+  // Forgot Password flow states
+  const [forgotPasswordStep, setForgotPasswordStep] = useState<'request' | 'verify' | 'success'>('request');
+  const [forgotIdentifier, setForgotIdentifier] = useState('');
+  const [forgotOtp, setForgotOtp] = useState('');
+  const [forgotNewPassword, setForgotNewPassword] = useState('');
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
+  const [forgotMaskedEmail, setForgotMaskedEmail] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   // Live username & email uniqueness checking for standard form
   const cleanUsernameLive = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
@@ -108,6 +81,14 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     status: 'idle',
     message: '',
   });
+
+  // Resend cooldown timer effect
+  useEffect(() => {
+    if (resendCooldown > 0) {
+      const timer = setTimeout(() => setResendCooldown((prev) => prev - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [resendCooldown]);
 
   // Async username validation effect
   useEffect(() => {
@@ -167,160 +148,6 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     };
   }, [cleanEmailLive, currentUser.id]);
 
-  // Async Google handle validation
-  useEffect(() => {
-    const cleanHandle = googleHandle.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-    if (!cleanHandle) {
-      setGoogleValidation({ status: 'idle', message: '' });
-      return;
-    }
-    if (cleanHandle.length < 3) {
-      setGoogleValidation({ status: 'invalid', message: 'Handle must be at least 3 characters' });
-      return;
-    }
-
-    let isMounted = true;
-    const timer = setTimeout(async () => {
-      const existsInDb = await supabaseService.checkUsernameExists(cleanHandle);
-      if (isMounted) {
-        if (existsInDb) {
-          setGoogleValidation({ status: 'taken', message: `Handle @${cleanHandle} is taken. Try adding a number.` });
-        } else {
-          setGoogleValidation({ status: 'available', message: `Handle @${cleanHandle} is available!` });
-        }
-      }
-    }, 300);
-
-    return () => {
-      isMounted = false;
-      clearTimeout(timer);
-    };
-  }, [googleHandle]);
-
-  // Handle Google email change and auto-populate name & handle
-  const handleGoogleEmailChange = (newEmail: string) => {
-    setError('');
-    setGoogleEmail(newEmail);
-    const clean = newEmail.trim().toLowerCase();
-    if (clean.includes('@')) {
-      const prefix = clean.split('@')[0].replace(/[^a-z0-9_]/g, '');
-      if (!googleHandle || googleHandle.startsWith('user_')) {
-        setGoogleHandle(prefix || `user_${Math.floor(1000 + Math.random() * 9000)}`);
-      }
-      if (!googleName) {
-        const formattedName = prefix
-          .split(/[_.]/)
-          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(' ');
-        setGoogleName(formattedName || 'Google User');
-      }
-    }
-  };
-
-  /**
-   * Main Google Authentication trigger for both 'register' and 'login'
-   */
-  const handleStartGoogleAuth = async (mode: 'register' | 'login' = 'register') => {
-    setError('');
-    setIsGoogleLoading(false);
-
-    // Open Google in-modal Authentication Flow directly so unconfigured external OAuth provider errors don't trigger
-    setGoogleAuthMode(mode);
-    if (!googleEmail) {
-      setGoogleEmail(currentUser.email || 'muhammedrafi042002@gmail.com');
-    }
-    if (!googleName) {
-      setGoogleName(currentUser.displayName && currentUser.displayName !== 'Campus Visitor' ? currentUser.displayName : 'Muhammed Rafi');
-    }
-    if (!googleHandle) {
-      setGoogleHandle(
-        currentUser.username && !currentUser.username.startsWith('user_') && currentUser.username !== 'guest'
-          ? currentUser.username
-          : 'muhammedrafii2002'
-      );
-    }
-  };
-
-  /**
-   * Complete Google Sign In
-   */
-  const handleCompleteGoogleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanEmail = googleEmail.trim().toLowerCase();
-
-    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
-      setError('Please enter a valid Google Account email (e.g. name@gmail.com).');
-      return;
-    }
-
-    setIsGoogleLoading(true);
-    setError('');
-
-    const existingUser = await supabaseService.getProfileByEmail(cleanEmail);
-
-    if (existingUser) {
-      setIsGoogleLoading(false);
-      onSaveProfile(existingUser, 'login');
-    } else {
-      // Auto-register and sign in with Google in 1 click
-      const result = await supabaseService.registerOrLoginWithGoogle({
-        email: cleanEmail,
-        displayName: cleanEmail.split('@')[0],
-        collegeId: currentUser.collegeId,
-      });
-      setIsGoogleLoading(false);
-      if (result.success && result.profile) {
-        onSaveProfile(result.profile, 'register');
-      } else {
-        setError(result.error || `Failed to sign in with Google.`);
-      }
-    }
-  };
-
-  /**
-   * Complete Google Registration
-   */
-  const handleCompleteGoogleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanEmail = googleEmail.trim().toLowerCase();
-    const cleanName = googleName.trim();
-    const cleanHandle = googleHandle.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-
-    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
-      setError('Please provide a valid Google Account email (e.g. name@gmail.com).');
-      return;
-    }
-
-    if (!cleanName) {
-      setError('Please provide your Google Account display name.');
-      return;
-    }
-
-    if (!cleanHandle || cleanHandle.length < 3) {
-      setError('Public handle must be at least 3 characters.');
-      return;
-    }
-
-    setIsGoogleLoading(true);
-    setError('');
-
-    const result = await supabaseService.registerOrLoginWithGoogle({
-      email: cleanEmail,
-      displayName: cleanName,
-      customUsername: cleanHandle,
-      collegeId: currentUser.collegeId,
-    });
-
-    setIsGoogleLoading(false);
-
-    if (!result.success || !result.profile) {
-      setError(result.error || 'Failed to complete Google registration.');
-      return;
-    }
-
-    onSaveProfile(result.profile, result.action);
-  };
-
   const handleEditProfileSave = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
@@ -374,7 +201,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       username: cleanUsername,
       displayName: displayName.trim(),
       email: email.trim(),
-      badge: badge.trim(),
+      badge: badge.trim() || '🎓 Campus Member',
       password: password.trim(),
       isRegistered: true,
       isAdmin,
@@ -437,20 +264,16 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       return;
     }
 
-    const isDevAccount =
-      cleanUsername === 'muhammedrafii2002' ||
-      email.trim().toLowerCase() === 'muhammedrafii2002@gmail.com';
-
     const updatedProfile: UserProfile = {
       ...currentUser,
-      profileId: isDevAccount ? 'PID-DEV202601' : `PID-${Math.floor(100000 + Math.random() * 900000)}`,
+      profileId: `PID-${Math.floor(100000 + Math.random() * 900000)}`,
       username: cleanUsername,
       displayName: displayName.trim(),
       email: email.trim(),
       password: password.trim(),
-      badge: isDevAccount ? '⚡ Lead Developer & Admin' : (badge.trim() || '🎓 Campus Member'),
+      badge: badge.trim() || '🎓 Campus Member',
       isRegistered: true,
-      isAdmin: isDevAccount ? true : false,
+      isAdmin: false,
     };
 
     // Save directly to Supabase DB
@@ -477,15 +300,98 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       return;
     }
 
-    // Authenticate strictly against Supabase DB
+    // Authenticate strictly against database
     const foundProfile: UserProfile | null = await supabaseService.authenticateUser(rawInput, loginPassword.trim());
 
     if (foundProfile) {
       onSaveProfile(foundProfile, 'login');
     } else {
-      setError('Account not found in Supabase database or password incorrect. Please create a new profile or check your credentials.');
+      setError('Account not found or password incorrect. Please check your credentials or use Forgot Password.');
       return;
     }
+  };
+
+  // Step 1: Request OTP for Forgot Password
+  const handleRequestResetOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const raw = forgotIdentifier.trim();
+    if (!raw) {
+      setError('Please enter your registered username or email.');
+      return;
+    }
+
+    setForgotLoading(true);
+    setError('');
+    setSuccessInfo('');
+
+    const res = await supabaseService.requestPasswordResetOtp(raw);
+    setForgotLoading(false);
+
+    if (!res.success) {
+      setError(res.error || 'Unable to send OTP. Please verify your username or email.');
+      return;
+    }
+
+    setForgotMaskedEmail(res.maskedEmail || res.email || '');
+    setForgotPasswordStep('verify');
+    setResendCooldown(60);
+    setSuccessInfo(`Verification code has been dispatched to ${res.maskedEmail || res.email}. Please check your inbox.`);
+  };
+
+  // Step 2: Verify OTP and Reset Password
+  const handleVerifyOtpAndReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanOtp = forgotOtp.trim();
+    const cleanPass = forgotNewPassword.trim();
+    const cleanConfirm = forgotConfirmPassword.trim();
+
+    if (!cleanOtp || cleanOtp.length !== 6) {
+      setError('Please enter the 6-digit OTP code sent to your email.');
+      return;
+    }
+
+    if (!cleanPass || cleanPass.length < 4) {
+      setError('New password must be at least 4 characters long.');
+      return;
+    }
+
+    if (cleanPass !== cleanConfirm) {
+      setError('New passwords do not match. Please re-enter.');
+      return;
+    }
+
+    setForgotLoading(true);
+    setError('');
+
+    const res = await supabaseService.verifyOtpAndResetPassword(forgotIdentifier, cleanOtp, cleanPass);
+    setForgotLoading(false);
+
+    if (!res.success || !res.profile) {
+      setError(res.error || 'Failed to verify OTP. Please try again.');
+      return;
+    }
+
+    // Success!
+    setForgotPasswordStep('success');
+    setLoginIdentifier(res.profile.username || res.profile.email);
+    setLoginPassword(cleanPass);
+  };
+
+  // Resend OTP handler
+  const handleResendOtp = async () => {
+    if (resendCooldown > 0) return;
+    setForgotLoading(true);
+    setError('');
+    const res = await supabaseService.requestPasswordResetOtp(forgotIdentifier);
+    setForgotLoading(false);
+
+    if (!res.success) {
+      setError(res.error || 'Could not resend OTP.');
+      return;
+    }
+
+    setResendCooldown(60);
+    setSuccessInfo(`A new OTP has been sent to ${res.maskedEmail || res.email}`);
   };
 
   return (
@@ -496,35 +402,30 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       }}
     >
       <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full border border-slate-200 overflow-hidden text-slate-800 my-auto max-h-[85vh] sm:max-h-[90vh] flex flex-col">
-        
         {/* Header Banner */}
         <div className="bg-gradient-to-r from-orange-500 via-amber-500 to-orange-600 px-5 py-4 text-white relative shrink-0 sticky top-0 z-10">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <div className="p-2 bg-white/10 rounded-2xl backdrop-blur-md border border-white/20 shrink-0">
-                {googleAuthMode ? (
-                  <GoogleIcon className="w-5 h-5" />
+                {authTab === 'forgot_password' ? (
+                  <KeyRound className="w-5 h-5 text-white" />
                 ) : (
                   <User className="w-5 h-5 text-white" />
                 )}
               </div>
               <div>
                 <h2 className="text-base sm:text-lg font-extrabold tracking-tight">
-                  {googleAuthMode === 'register'
-                    ? 'Register with Google'
-                    : googleAuthMode === 'login'
-                    ? 'Sign In with Google'
-                    : currentUser.isRegistered
+                  {currentUser.isRegistered
                     ? 'Member Profile'
                     : authTab === 'create'
                     ? 'Create Profile & Register'
+                    : authTab === 'forgot_password'
+                    ? 'Reset Password (OTP)'
                     : 'Sign In'}
                 </h2>
                 <p className="text-[11px] text-orange-100 mt-0.5">
-                  {googleAuthMode === 'register'
-                    ? 'Connect your Google account for 1-click verified access'
-                    : googleAuthMode === 'login'
-                    ? 'Fast 1-click login with your Google account'
+                  {authTab === 'forgot_password'
+                    ? 'Reset your password using an OTP sent to your email'
                     : requiredForAction
                     ? `Set up profile to ${requiredForAction}`
                     : 'Interact in rooms, post updates, and chat privately'}
@@ -541,13 +442,14 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </button>
           </div>
 
-          {/* Auth Tab Toggle (Hidden during Google auth flows or when logged in) */}
-          {!currentUser.isRegistered && !googleAuthMode && (
+          {/* Auth Tab Toggle */}
+          {!currentUser.isRegistered && (
             <div className="mt-3 flex bg-black/20 p-1 rounded-xl text-xs font-bold">
               <button
                 type="button"
                 onClick={() => {
                   setError('');
+                  setSuccessInfo('');
                   setAuthTab('create');
                 }}
                 className={`flex-1 py-1.5 rounded-lg transition cursor-pointer ${
@@ -560,24 +462,26 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 type="button"
                 onClick={() => {
                   setError('');
+                  setSuccessInfo('');
                   setAuthTab('login');
                 }}
                 className={`flex-1 py-1.5 rounded-lg transition cursor-pointer ${
                   authTab === 'login' ? 'bg-white text-orange-600 shadow-xs' : 'text-orange-100 hover:text-white'
                 }`}
               >
-                Sign In with Password
+                Sign In
               </button>
             </div>
           )}
         </div>
 
         <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
-          {requiredForAction && !googleAuthMode && (
+          {requiredForAction && authTab !== 'forgot_password' && (
             <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 flex items-start gap-3">
               <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
               <p className="text-xs text-amber-800 font-medium">
-                Browsing is open to all visitors, but you must register or log in to <span className="font-bold">{requiredForAction}</span>.
+                Browsing is open to all visitors, but you must register or log in to{' '}
+                <span className="font-bold">{requiredForAction}</span>.
               </p>
             </div>
           )}
@@ -589,208 +493,230 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </div>
           )}
 
-          {/* If Google Registration Flow is Active */}
-          {googleAuthMode === 'register' ? (
-            <form onSubmit={handleCompleteGoogleRegister} className="space-y-4">
-              <div className="bg-gradient-to-br from-blue-50 to-indigo-50/50 border border-blue-200 rounded-2xl p-3.5 space-y-1.5">
-                <div className="flex items-center gap-2 text-blue-900 font-bold text-xs">
-                  <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
-                  <span>Google Account Fast Registration</span>
-                </div>
-                <p className="text-[11px] text-blue-700 leading-relaxed">
-                  Your profile will be verified with your Google account. You will receive a verified badge and full access to private chats and rooms.
-                </p>
-              </div>
+          {successInfo && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-2xl p-3 font-medium flex items-start gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <span>{successInfo}</span>
+            </div>
+          )}
 
-              {/* Google Email */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Google Account Email <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="email"
-                    value={googleEmail}
-                    onChange={(e) => handleGoogleEmailChange(e.target.value)}
-                    placeholder="student@gmail.com or user@college.edu"
-                    required
-                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition"
-                  />
-                </div>
-                <p className="text-[10px] text-slate-500 mt-1">
-                  If this email is already registered, you will be signed in directly.
-                </p>
-              </div>
+          {/* FORGOT PASSWORD TAB */}
+          {authTab === 'forgot_password' ? (
+            <div className="space-y-4">
+              {forgotPasswordStep === 'request' ? (
+                /* STEP 1: REQUEST OTP */
+                <form onSubmit={handleRequestResetOtp} className="space-y-4">
+                  <div className="bg-gradient-to-br from-orange-50 to-amber-50/50 border border-orange-200 rounded-2xl p-3.5 space-y-1.5">
+                    <div className="flex items-center gap-2 text-orange-950 font-bold text-xs">
+                      <Mail className="w-4 h-4 text-orange-600 shrink-0" />
+                      <span>Email OTP Password Reset</span>
+                    </div>
+                    <p className="text-[11px] text-orange-800 leading-relaxed">
+                      Enter your registered username or email. We will generate a secure 6-digit OTP to reset your password.
+                    </p>
+                  </div>
 
-              {/* Google Display Name */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Display Name (From Google) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={googleName}
-                  onChange={(e) => {
-                    setError('');
-                    setGoogleName(e.target.value);
-                  }}
-                  placeholder="e.g. Arjun Kumar"
-                  required
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition"
-                />
-              </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Username or Email Address <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={forgotIdentifier}
+                        onChange={(e) => {
+                          setError('');
+                          setForgotIdentifier(e.target.value);
+                        }}
+                        placeholder="@username or user@college.edu"
+                        required
+                        className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-orange-500 focus:bg-white outline-none transition"
+                      />
+                    </div>
+                  </div>
 
-              {/* Public Username Handle */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Choose Public Handle (@username) <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-xs">@</span>
-                  <input
-                    type="text"
-                    value={googleHandle}
-                    onChange={(e) => {
+                  <div className="pt-2 flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setError('');
+                        setAuthTab('login');
+                      }}
+                      className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" />
+                      <span>Back to Sign In</span>
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={forgotLoading}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-bold shadow-md shadow-orange-500/20 active:scale-95 transition disabled:opacity-50 cursor-pointer"
+                    >
+                      <Mail className="w-4 h-4" />
+                      <span>{forgotLoading ? 'Sending OTP...' : 'Send Verification OTP'}</span>
+                    </button>
+                  </div>
+                </form>
+              ) : forgotPasswordStep === 'verify' ? (
+                /* STEP 2: VERIFY OTP & ENTER NEW PASSWORD */
+                <form onSubmit={handleVerifyOtpAndReset} className="space-y-4">
+                  {/* Email Dispatch Notice (Real Application Standard) */}
+                  <div className="bg-gradient-to-br from-slate-900 via-slate-850 to-slate-900 border border-slate-700/80 rounded-2xl p-4 shadow-md text-white space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-orange-400 font-extrabold text-xs">
+                        <Mail className="w-4 h-4 text-orange-400 shrink-0" />
+                        <span>Check Your Email</span>
+                      </div>
+                      <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-md">
+                        OTP Sent
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300">
+                      We have sent a 6-digit verification code to <strong className="text-white font-mono">{forgotMaskedEmail}</strong>.
+                    </p>
+                    <div className="text-[11px] text-slate-400 bg-slate-950/70 rounded-xl p-2.5 border border-slate-800 space-y-1">
+                      <p className="flex items-center gap-1.5 text-amber-300 font-semibold">
+                        <span>✉️</span> Check your Inbox or Spam/Junk folder
+                      </p>
+                      <p className="text-slate-400">
+                        The verification code expires in 10 minutes. Please enter the code below to set a new password.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 6-Digit OTP input */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Enter 6-Digit OTP Code <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        maxLength={6}
+                        value={forgotOtp}
+                        onChange={(e) => {
+                          setError('');
+                          setForgotOtp(e.target.value.replace(/[^0-9]/g, ''));
+                        }}
+                        placeholder="e.g. 482915"
+                        required
+                        className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono font-bold tracking-widest focus:ring-2 focus:ring-orange-500 focus:bg-white outline-none transition"
+                      />
+                    </div>
+                  </div>
+
+                  {/* New Password */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      New Password <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="password"
+                        value={forgotNewPassword}
+                        onChange={(e) => {
+                          setError('');
+                          setForgotNewPassword(e.target.value);
+                        }}
+                        placeholder="••••••••"
+                        required
+                        className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-orange-500 focus:bg-white outline-none transition"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Confirm New Password */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Confirm New Password <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="password"
+                        value={forgotConfirmPassword}
+                        onChange={(e) => {
+                          setError('');
+                          setForgotConfirmPassword(e.target.value);
+                        }}
+                        placeholder="••••••••"
+                        required
+                        className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-orange-500 focus:bg-white outline-none transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs pt-1">
+                    <button
+                      type="button"
+                      onClick={handleResendOtp}
+                      disabled={resendCooldown > 0 || forgotLoading}
+                      className="flex items-center gap-1 text-orange-600 hover:text-orange-800 font-bold disabled:text-slate-400 cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${forgotLoading ? 'animate-spin' : ''}`} />
+                      <span>{resendCooldown > 0 ? `Resend OTP in ${resendCooldown}s` : 'Resend OTP'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForgotPasswordStep('request')}
+                      className="text-slate-500 hover:text-slate-700 underline font-medium cursor-pointer"
+                    >
+                      Change Email/User
+                    </button>
+                  </div>
+
+                  {/* Submit Button */}
+                  <div className="pt-2 flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setError('');
+                        setAuthTab('login');
+                      }}
+                      className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={forgotLoading}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-500/20 active:scale-95 transition disabled:opacity-50 cursor-pointer"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>{forgotLoading ? 'Resetting...' : 'Verify OTP & Reset Password'}</span>
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                /* STEP 3: SUCCESS */
+                <div className="text-center py-6 space-y-4">
+                  <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-inner">
+                    <CheckCircle2 className="w-10 h-10" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-slate-900">Password Reset Successfully!</h3>
+                    <p className="text-xs text-slate-600 mt-1">
+                      Your password has been updated. You can now sign in with your new password.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthTab('login');
+                      setForgotPasswordStep('request');
                       setError('');
-                      setGoogleHandle(e.target.value);
+                      setSuccessInfo('Password updated! Please click Sign In to continue.');
                     }}
-                    placeholder="arjun_k"
-                    required
-                    className={`w-full pl-8 pr-4 py-2.5 bg-slate-50 border rounded-xl text-xs font-medium focus:ring-2 outline-none transition ${
-                      googleValidation.status === 'taken'
-                        ? 'border-red-400 focus:ring-red-400'
-                        : googleValidation.status === 'available'
-                        ? 'border-emerald-400 focus:ring-emerald-400'
-                        : 'border-slate-300 focus:ring-blue-500'
-                    }`}
-                  />
+                    className="w-full py-3 bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-xs rounded-xl shadow-md transition cursor-pointer"
+                  >
+                    Sign In with New Password
+                  </button>
                 </div>
-                {googleValidation.status === 'taken' && (
-                  <p className="text-[11px] font-bold text-red-600 mt-1 flex items-center gap-1">
-                    <XCircle className="w-3.5 h-3.5 text-red-600 shrink-0" />
-                    <span>{googleValidation.message}</span>
-                  </p>
-                )}
-                {googleValidation.status === 'available' && (
-                  <p className="text-[11px] font-bold text-emerald-600 mt-1 flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                    <span>{googleValidation.message}</span>
-                  </p>
-                )}
-              </div>
-
-              {/* Badge Preview */}
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-600">Assigned Badge:</span>
-                <span className="px-2.5 py-1 bg-blue-100 text-blue-800 text-[11px] font-extrabold rounded-lg border border-blue-200">
-                  🎓 Campus Member (Google Verified)
-                </span>
-              </div>
-
-              {/* Actions */}
-              <div className="pt-2 flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setError('');
-                    setGoogleAuthMode(null);
-                  }}
-                  className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
-                >
-                  <ArrowLeft className="w-3.5 h-3.5" />
-                  <span>Back</span>
-                </button>
-                <button
-                  type="submit"
-                  disabled={isGoogleLoading}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 active:scale-95 transition disabled:opacity-50 cursor-pointer"
-                >
-                  <GoogleIcon className="w-4 h-4 brightness-125" />
-                  <span>{isGoogleLoading ? 'Connecting...' : 'Complete Google Registration'}</span>
-                </button>
-              </div>
-
-              <div className="text-center pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setError('');
-                    setGoogleAuthMode('login');
-                  }}
-                  className="text-[11px] text-blue-600 hover:text-blue-800 font-bold underline cursor-pointer"
-                >
-                  Already registered with Google? Sign in here
-                </button>
-              </div>
-            </form>
-          ) : googleAuthMode === 'login' ? (
-            /* If Google Login Flow is Active */
-            <form onSubmit={handleCompleteGoogleLogin} className="space-y-4">
-              <div className="bg-gradient-to-br from-blue-50 to-indigo-50/50 border border-blue-200 rounded-2xl p-3.5 space-y-1.5">
-                <div className="flex items-center gap-2 text-blue-900 font-bold text-xs">
-                  <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
-                  <span>Google Account 1-Click Sign In</span>
-                </div>
-                <p className="text-[11px] text-blue-700 leading-relaxed">
-                  Sign in instantly with your registered Google Account email. No password required.
-                </p>
-              </div>
-
-              {/* Google Email */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Google Account Email <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="email"
-                    value={googleEmail}
-                    onChange={(e) => handleGoogleEmailChange(e.target.value)}
-                    placeholder="student@gmail.com or user@college.edu"
-                    required
-                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition"
-                  />
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="pt-2 flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setError('');
-                    setGoogleAuthMode(null);
-                  }}
-                  className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
-                >
-                  <ArrowLeft className="w-3.5 h-3.5" />
-                  <span>Back</span>
-                </button>
-                <button
-                  type="submit"
-                  disabled={isGoogleLoading}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 active:scale-95 transition disabled:opacity-50 cursor-pointer"
-                >
-                  <GoogleIcon className="w-4 h-4 brightness-125" />
-                  <span>{isGoogleLoading ? 'Signing in...' : 'Sign In with Google'}</span>
-                </button>
-              </div>
-
-              <div className="text-center pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setError('');
-                    setGoogleAuthMode('register');
-                  }}
-                  className="text-[11px] text-blue-600 hover:text-blue-800 font-bold underline cursor-pointer"
-                >
-                  New here? Register with Google in 1-Click
-                </button>
-              </div>
-            </form>
+              )}
+            </div>
           ) : currentUser.isRegistered ? (
             /* IF ALREADY LOGGED IN */
             isEditingProfile ? (
@@ -938,20 +864,20 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   )}
                 </div>
 
-                {/* Developer Dashboard Shortcut for Admin/Developer */}
+                {/* Developer Dashboard Shortcut for Admin */}
                 {currentUser.isAdmin && onOpenAdminPanel && (
                   <div className="bg-purple-900/90 text-white rounded-2xl p-4 border border-purple-700 shadow-lg space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Shield className="w-5 h-5 text-purple-300" />
-                        <span className="font-extrabold text-xs text-purple-100">Lead Developer & Admin Authorized</span>
+                        <span className="font-extrabold text-xs text-purple-100">Administrator Access</span>
                       </div>
                       <span className="px-2 py-0.5 bg-purple-500/30 text-purple-200 border border-purple-400/40 text-[9px] font-black rounded uppercase">
                         Active
                       </span>
                     </div>
                     <p className="text-[11px] text-purple-200/80 leading-relaxed">
-                      You have full universal admin access. Access system reports, room deletion approvals, and live content controls.
+                      Universal administrator privileges active. Access system reports, room deletion approvals, and moderation tools.
                     </p>
                     <button
                       type="button"
@@ -962,7 +888,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                       className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-purple-500 hover:bg-purple-400 text-white rounded-xl text-xs font-black shadow-md transition transform active:scale-95 border border-purple-400 cursor-pointer"
                     >
                       <Shield className="w-4 h-4 fill-white/20" />
-                      <span>⚡ Launch Developer Dashboard</span>
+                      <span>⚡ Launch Admin Dashboard</span>
                     </button>
                   </div>
                 )}
@@ -1015,29 +941,6 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           ) : authTab === 'create' ? (
             /* CREATE PROFILE / REGISTER FORM */
             <div className="space-y-4">
-              {/* GOOGLE REGISTRATION BUTTON */}
-              <button
-                type="button"
-                onClick={() => handleStartGoogleAuth('register')}
-                disabled={isGoogleLoading}
-                className="w-full flex items-center justify-center gap-3 py-3 px-4 bg-white hover:bg-slate-50 text-slate-800 font-extrabold text-xs sm:text-sm rounded-2xl border border-slate-300 shadow-sm transition hover:border-slate-400 hover:shadow active:scale-[0.99] cursor-pointer"
-              >
-                <GoogleIcon className="w-5 h-5 shrink-0" />
-                <span>Register with Google Account</span>
-                <span className="ml-auto text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 font-black px-2 py-0.5 rounded-lg uppercase tracking-wider">
-                  1-Click
-                </span>
-              </button>
-
-              {/* DIVIDER */}
-              <div className="relative flex py-1 items-center">
-                <div className="flex-grow border-t border-slate-200"></div>
-                <span className="shrink mx-3 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
-                  or register with password
-                </span>
-                <div className="flex-grow border-t border-slate-200"></div>
-              </div>
-
               <form onSubmit={handleCreateSubmit} className="space-y-3.5">
                 <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1">
                   <div className="flex items-center gap-1.5 text-slate-800 font-bold text-xs">
@@ -1186,26 +1089,6 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           ) : (
             /* LOGIN FORM */
             <div className="space-y-4">
-              {/* GOOGLE SIGN IN BUTTON */}
-              <button
-                type="button"
-                onClick={() => handleStartGoogleAuth('login')}
-                disabled={isGoogleLoading}
-                className="w-full flex items-center justify-center gap-3 py-3 px-4 bg-white hover:bg-slate-50 text-slate-800 font-extrabold text-xs sm:text-sm rounded-2xl border border-slate-300 shadow-sm transition hover:border-slate-400 hover:shadow active:scale-[0.99] cursor-pointer"
-              >
-                <GoogleIcon className="w-5 h-5 shrink-0" />
-                <span>Sign in with Google Account</span>
-              </button>
-
-              {/* DIVIDER */}
-              <div className="relative flex py-1 items-center">
-                <div className="flex-grow border-t border-slate-200"></div>
-                <span className="shrink mx-3 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
-                  or sign in with password
-                </span>
-                <div className="flex-grow border-t border-slate-200"></div>
-              </div>
-
               <form onSubmit={handleLoginSubmit} className="space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -1218,7 +1101,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                       setError('');
                       setLoginIdentifier(e.target.value);
                     }}
-                    placeholder="@arjun_bsc or user@college.edu"
+                    placeholder="@username or user@college.edu"
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-orange-500 focus:bg-white outline-none transition"
                   />
                 </div>
@@ -1239,6 +1122,20 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                       placeholder="••••••••"
                       className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-orange-500 focus:bg-white outline-none transition"
                     />
+                  </div>
+                  <div className="flex justify-end mt-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setError('');
+                        setForgotIdentifier(loginIdentifier || '');
+                        setForgotPasswordStep('request');
+                        setAuthTab('forgot_password');
+                      }}
+                      className="text-xs text-orange-600 hover:text-orange-700 font-bold hover:underline cursor-pointer"
+                    >
+                      Forgot password?
+                    </button>
                   </div>
                 </div>
 

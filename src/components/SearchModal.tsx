@@ -305,7 +305,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {filteredUsers.slice(0, activeFilter === 'all' ? 4 : 20).map((u) => {
                   const isMe = u.username.toLowerCase() === currentUser.username.toLowerCase();
-                  const isDev = u.username === 'muhammedrafii2002' || u.isAdmin;
+                  const isDev = Boolean(u.isAdmin);
 
                   return (
                     <div

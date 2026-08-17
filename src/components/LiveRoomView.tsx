@@ -200,12 +200,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
   const expiry = getRoomExpirationText(room.lastActivityAt);
 
   // Identity checks - strictly authenticate creator and super admin privileges
-  const isDevUser = Boolean(
-    currentUser.isAdmin ||
-    currentUser.username === 'muhammedrafii2002' ||
-    currentUser.username === 'muhammedrafi042002' ||
-    currentUser.email === 'muhammedrafi042002@gmail.com'
-  );
+  const isDevUser = Boolean(currentUser.isAdmin);
 
   const isCreator = Boolean(
     isDevUser ||
@@ -445,9 +440,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
         {parts.map((part, i) => {
           if (part.startsWith('@')) {
             const rawHandle = part.slice(1);
-            const isDevMention = rawHandle.toLowerCase() === 'muhammedrafii2002' || rawHandle.toLowerCase() === 'developer';
-            const displayLabel = isDevMention ? '@developer' : part;
-            const targetHandle = isDevMention ? 'muhammedrafii2002' : rawHandle;
+            const targetHandle = rawHandle;
 
             return (
               <button
@@ -461,9 +454,9 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                   }
                 }}
                 className="inline-flex items-center gap-0.5 px-1.5 py-0.2 mx-0.5 bg-orange-500/20 hover:bg-orange-500/40 text-orange-300 font-bold rounded-md border border-orange-500/30 text-xs transition cursor-pointer active:scale-95"
-                title={isDevMention ? 'View Developer Profile' : `View profile details for @${rawHandle}`}
+                title={`View profile details for @${rawHandle}`}
               >
-                {displayLabel}
+                {part}
               </button>
             );
           }
@@ -825,7 +818,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                   {room.deletionReason ? `Reason: "${room.deletionReason}"` : 'The creator has requested developer admin review to delete this room.'}
                 </p>
                 <p className="text-[11px] text-amber-400/70 mt-0.5">
-                  Lead Developer Admin (`@muhammedrafii2002`) has received this in the moderation queue.
+                  Platform Administrators have received this in the moderation queue.
                 </p>
               </div>
             </div>
@@ -972,9 +965,8 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
               const isMe = msg.senderUsername === currentUser.username;
               const isMsgCreator = room.creatorUsername === msg.senderUsername;
               const isPinned = room.pinnedMessageId === msg.id;
-              const isDevSender = msg.senderUsername === 'muhammedrafii2002' || (!msg.isAnonymous && msg.senderName?.includes('Muhammed Rafi'));
-              const senderDisplayName = isDevSender ? 'Developer' : msg.senderName;
-              const senderBadge = isDevSender ? '⚡ Developer' : msg.senderBadge;
+              const senderDisplayName = msg.senderName;
+              const senderBadge = msg.senderBadge;
 
               return (
                 <div
@@ -993,13 +985,11 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                         ? 'bg-purple-950 text-purple-400 border border-purple-700/50'
                         : isMe
                         ? 'bg-orange-600 text-white shadow-md cursor-pointer'
-                        : isDevSender
-                        ? 'bg-gradient-to-tr from-orange-600 to-amber-500 text-white shadow-md cursor-pointer border border-orange-400/40'
                         : 'bg-slate-800 text-orange-400 border border-slate-700 cursor-pointer hover:border-orange-500'
                     }`}
                     title={msg.isAnonymous ? 'Anonymous Member' : `View @${msg.senderUsername}`}
                   >
-                    {msg.isAnonymous ? '🕵️' : isDevSender ? '👨‍💻' : (senderDisplayName?.charAt(0) || 'U')}
+                    {msg.isAnonymous ? '🕵️' : (senderDisplayName?.charAt(0) || 'U')}
                   </div>
 
                   {/* Message Content Bubble */}
@@ -2058,7 +2048,7 @@ export const LiveRoomView: React.FC<LiveRoomViewProps> = ({
                 const isMe = username === currentUser.username;
                 const isMemberCreator = room.creatorUsername === username;
                 const isMemberAdmin = Boolean(room.roomAdmins?.includes(username));
-                const isDevMember = username === 'muhammedrafii2002' || username === 'muhammedrafi042002';
+                const isDevMember = false;
 
                 return (
                   <div
